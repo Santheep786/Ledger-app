@@ -1,0 +1,3569 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+<title>Ledger â€” Household Expense Manager</title>
+<meta name="description" content="Shared household ledger backed by your own Google Sheet." />
+
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#202A3C" />
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Ledger" />
+<link rel="icon" href="icons/icon-192.png" />
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap');
+  html, body { margin: 0; padding: 0; background: #F7F2E7; height: 100%; overscroll-behavior-y: none; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  #root { height: 100vh; height: 100dvh; }
+  input, select { font-family: inherit; }
+  input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.3); }
+  #splash {
+    position: fixed; inset: 0; background: #202A3C; color: #F7F2E7;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Fraunces', Georgia, serif; font-size: 20px; z-index: 9999;
+    transition: opacity 0.3s ease;
+  }
+</style>
+</head>
+<body>
+<div id="splash">Opening your ledger&hellip;</div>
+<div id="root"></div>
+
+<!-- React -->
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+
+<!-- Google Identity Services (for OAuth sign-in) -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<script>
+window.__hideSplash = function() {
+  var s = document.getElementById('splash');
+  if (s) { s.style.opacity = '0'; setTimeout(function(){ s.remove(); }, 300); }
+};
+</script>
+
+<script>
+const { useState, useEffect, useMemo, useCallback } = React;
+
+/* ============================================================
+   ICONS (hand-rolled inline SVGs â€” zero external icon dependency)
+   ============================================================ */
+function Icon({
+  children,
+  size = 20,
+  strokeWidth = 2,
+  color = "currentColor"
+}) {
+  return /*#__PURE__*/React.createElement("svg", {
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: color,
+    strokeWidth: strokeWidth,
+    strokeLinecap: "round",
+    strokeLinejoin: "round"
+  }, children);
+}
+const Home = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M3 11.5 12 4l9 7.5"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M5.5 10v9a1 1 0 0 0 1 1H9a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1h2.5a1 1 0 0 0 1-1v-9"
+}));
+const Plus = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M12 5v14M5 12h14"
+}));
+const ListIcon = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M8 6h13M8 12h13M8 18h13"
+}), /*#__PURE__*/React.createElement("circle", {
+  cx: "3.5",
+  cy: "6",
+  r: "1.2",
+  fill: "currentColor",
+  stroke: "none"
+}), /*#__PURE__*/React.createElement("circle", {
+  cx: "3.5",
+  cy: "12",
+  r: "1.2",
+  fill: "currentColor",
+  stroke: "none"
+}), /*#__PURE__*/React.createElement("circle", {
+  cx: "3.5",
+  cy: "18",
+  r: "1.2",
+  fill: "currentColor",
+  stroke: "none"
+}));
+const CreditCard = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("rect", {
+  x: "2.5",
+  y: "5.5",
+  width: "19",
+  height: "13",
+  rx: "2"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M2.5 10h19"
+}));
+const Menu = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M4 6h16M4 12h16M4 18h16"
+}));
+const X = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M6 6l12 12M18 6 6 18"
+}));
+const Check = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M4.5 12.5 9.5 18l10-12"
+}));
+const Trash2 = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M4 7h16"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M9.5 7V4.6c0-.6.4-1 1-1h3c.6 0 1 .4 1 1V7"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M6.5 7l1 12.4c.05.9.8 1.6 1.7 1.6h5.6c.9 0 1.65-.7 1.7-1.6L17.5 7"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M10.3 11v6M13.7 11v6"
+}));
+const PiggyBank = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M4.5 12.2c0-3.7 3.4-6.7 7.6-6.7 2.4 0 4.6 1 6 2.6h2.1l-.7 2.6-1.6.5v2.6l1.6 2.6h-2.7l-1-1.6c-1.2.6-2.6.9-4 .9h-.3l-1 3.1H7.9l-.6-3c-1.7-.9-2.8-2.6-2.8-4.6Z"
+}), /*#__PURE__*/React.createElement("circle", {
+  cx: "9.3",
+  cy: "11",
+  r: ".9",
+  fill: "currentColor",
+  stroke: "none"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M9 5.5V4M6.7 6.4 5.6 5.2"
+}));
+const Landmark = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M3 21h18"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M4.5 21v-9M9 21v-9M15 21v-9M19.5 21v-9"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M2.5 12h19L12 4.5 2.5 12Z"
+}));
+const Sprout = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M7 20h10"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M12 20v-8"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M12 12c3.5 0 6-2.5 6-6 0 0-2 1.5-6 1.5S6 6 6 6c0 3.5 2.5 6 6 6Z"
+}), /*#__PURE__*/React.createElement("path", {
+  d: "M12 12c0-3.5-2.5-6-6-6 0 0 1.5 2 1.5 6"
+}));
+const ChevronRight = p => /*#__PURE__*/React.createElement(Icon, p, /*#__PURE__*/React.createElement("path", {
+  d: "M9 6l6 6-6 6"
+}));
+
+/* ============================================================
+   MINI CHART (hand-rolled SVG bar chart â€” no chart library dependency)
+   ============================================================ */
+function MiniBarChart({
+  data,
+  height = 150
+}) {
+  const max = Math.max(1, ...data.map(d => Math.max(d.Income, d.Expense)));
+  const barW = 100 / data.length;
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: `0 0 100 ${height}`,
+    width: "100%",
+    height: height,
+    preserveAspectRatio: "none"
+  }, data.map((d, i) => {
+    const x = i * barW;
+    const incH = d.Income / max * (height - 22);
+    const expH = d.Expense / max * (height - 22);
+    const bw = barW * 0.32;
+    return /*#__PURE__*/React.createElement("g", {
+      key: i
+    }, /*#__PURE__*/React.createElement("rect", {
+      x: x + barW * 0.14,
+      y: height - 20 - incH,
+      width: bw,
+      height: incH,
+      fill: COLOR.banyanSoft,
+      rx: "1"
+    }), /*#__PURE__*/React.createElement("rect", {
+      x: x + barW * 0.54,
+      y: height - 20 - expH,
+      width: bw,
+      height: expH,
+      fill: COLOR.brickSoft,
+      rx: "1"
+    }), /*#__PURE__*/React.createElement("text", {
+      x: x + barW / 2,
+      y: height - 6,
+      fontSize: "3.6",
+      textAnchor: "middle",
+      fill: COLOR.mutedInk,
+      fontFamily: FONT_BODY
+    }, d.month));
+  }));
+}
+
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================ */
+const COLOR = {
+  paper: "#F7F2E7",
+  paperDeep: "#EFE7D6",
+  ink: "#202A3C",
+  inkSoft: "#3A4658",
+  brick: "#A63A2E",
+  brickSoft: "#C75B4E",
+  banyan: "#3F6B4E",
+  banyanSoft: "#5C8A6C",
+  marigold: "#C99A2E",
+  rule: "#E3D9C1",
+  mutedInk: "#6B6355",
+  white: "#FFFEFB"
+};
+const FONT_DISPLAY = "'Fraunces', 'Georgia', serif";
+const FONT_BODY = "'Inter', system-ui, sans-serif";
+
+/* ============================================================
+   DATA CONSTANTS
+   ============================================================ */
+const INCOME_CATEGORIES = ["Salary", "PF (Employer)", "Cow Milk Sale", "Hen / Eggs Sale", "Goat Sale", "Stock Market Gains", "Dividend", "Loan Received", "Money Received (Gift/Reimbursement)", "Other Income"];
+const EXPENSE_CATEGORIES = ["Rent", "Water", "Maintenance", "Electricity", "Internet Bill", "Milk", "Groceries", "Vegetables", "Food", "Cosmetic", "Medical", "Subscriptions", "Mobile Recharge", "Metro Recharge", "Fuel", "Movies", "Weekend Transport", "Shopping", "Self Care", "Money Sent", "Loan EMI", "Credit Card Bill Payment", "Miscellaneous", "Other Expense"];
+const INVESTMENT_TYPES = ["Mutual Fund", "Stocks / Share Market", "Fixed Deposit", "Provident Fund (PF)", "Livestock - Cow", "Livestock - Goat", "Livestock - Hen", "Gold", "Other Investment"];
+const TRANSFER_CATEGORIES = ["Cash Withdrawal (Credit Card)", "Credit Card Bill Payment", "Internal Bank Transfer", "Other Transfer"];
+const CARD_NAMES = ["ICICI Credit Card", "IDFC Credit Card", "TATA NEO Credit Card"];
+const QE_TYPES = ["Income", "Expense", "Investment", "Loan Payment", "Transfer"];
+const DEFAULT_SETTINGS = {
+  bank1Name: "ICICI Bank",
+  bank2Name: "Bank Account 2",
+  fyStartYear: 2026,
+  cards: [{
+    name: "ICICI Credit Card",
+    cycleStartDay: 5,
+    creditLimit: 260000,
+    dueDays: 18
+  }, {
+    name: "IDFC Credit Card",
+    cycleStartDay: 1,
+    creditLimit: 100000,
+    dueDays: 18
+  }, {
+    name: "TATA NEO Credit Card",
+    cycleStartDay: 1,
+    creditLimit: 100000,
+    dueDays: 18
+  }]
+};
+const DEFAULT_LOANS = [{
+  id: "loan-car",
+  name: "Car Loan",
+  lender: "ICICI Bank",
+  principal: 700000,
+  rate: 9.0,
+  tenureMonths: 60,
+  startDate: "2025-04-01",
+  dueDay: 1
+}, {
+  id: "loan-kulu",
+  name: "Kulu",
+  lender: "Kulu Finance",
+  principal: 240000,
+  rate: 14.0,
+  tenureMonths: 12,
+  startDate: "2026-03-01",
+  dueDay: 1
+}, {
+  id: "loan-icici",
+  name: "ICICI Loan",
+  lender: "ICICI Bank",
+  principal: 0,
+  rate: 11.0,
+  tenureMonths: 36,
+  startDate: "2026-04-01",
+  dueDay: 5
+}, {
+  id: "loan-lt",
+  name: "L&T Loan",
+  lender: "L&T Finance",
+  principal: 292273.80,
+  rate: 13.0,
+  tenureMonths: 24,
+  startDate: "2026-06-01",
+  dueDay: 5
+}];
+const DEFAULT_BUDGETS = {};
+
+// Seed transactions mirroring the original spreadsheet's migrated history, so
+// the app opens already populated instead of empty.
+const SEED_TRANSACTIONS = [{
+  date: "2026-04-01",
+  type: "Income",
+  category: "Salary",
+  subcategory: "April salary",
+  paymentMethod: "ICICI Bank",
+  amount: 71854.42,
+  notes: ""
+}, {
+  date: "2026-04-05",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "1st-10th",
+  paymentMethod: "Cash",
+  amount: 6917.65,
+  notes: ""
+}, {
+  date: "2026-04-15",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "11th-20th",
+  paymentMethod: "Cash",
+  amount: 5805.15,
+  notes: ""
+}, {
+  date: "2026-04-25",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "21st-30th",
+  paymentMethod: "Cash",
+  amount: 4733.50,
+  notes: ""
+}, {
+  date: "2026-04-05",
+  type: "Transfer",
+  category: "Cash Withdrawal (Credit Card)",
+  subcategory: "Cash advance",
+  paymentMethod: "ICICI Credit Card",
+  amount: 90000,
+  notes: "Withdrawn against ICICI credit card limit"
+}, {
+  date: "2026-04-03",
+  type: "Expense",
+  category: "Groceries",
+  subcategory: "1st-7th",
+  paymentMethod: "Cash",
+  amount: 75,
+  notes: ""
+}, {
+  date: "2026-04-17",
+  type: "Expense",
+  category: "Food",
+  subcategory: "15th-20th",
+  paymentMethod: "Cash",
+  amount: 140,
+  notes: ""
+}, {
+  date: "2026-04-26",
+  type: "Expense",
+  category: "Food",
+  subcategory: "21st-31st",
+  paymentMethod: "Cash",
+  amount: 230,
+  notes: ""
+}, {
+  date: "2026-04-03",
+  type: "Expense",
+  category: "Cosmetic",
+  subcategory: "1st-7th",
+  paymentMethod: "Cash",
+  amount: 699,
+  notes: ""
+}, {
+  date: "2026-04-03",
+  type: "Expense",
+  category: "Money Sent",
+  subcategory: "1st-7th",
+  paymentMethod: "ICICI Bank",
+  amount: 6000,
+  notes: ""
+}, {
+  date: "2026-04-01",
+  type: "Expense",
+  category: "Rent",
+  subcategory: "April rent",
+  paymentMethod: "ICICI Bank",
+  amount: 10000,
+  notes: ""
+}, {
+  date: "2026-04-01",
+  type: "Expense",
+  category: "Water",
+  subcategory: "April water bill",
+  paymentMethod: "ICICI Bank",
+  amount: 1000,
+  notes: ""
+}, {
+  date: "2026-04-01",
+  type: "Expense",
+  category: "Maintenance",
+  subcategory: "April maintenance",
+  paymentMethod: "ICICI Bank",
+  amount: 1000,
+  notes: ""
+}, {
+  date: "2026-04-01",
+  type: "Expense",
+  category: "Subscriptions",
+  subcategory: "Spotify",
+  paymentMethod: "ICICI Credit Card",
+  amount: 139,
+  notes: ""
+}, {
+  date: "2026-04-10",
+  type: "Expense",
+  category: "Mobile Recharge",
+  subcategory: "April recharge",
+  paymentMethod: "ICICI Bank",
+  amount: 3691,
+  notes: ""
+}, {
+  date: "2026-04-01",
+  type: "Expense",
+  category: "Loan EMI",
+  subcategory: "Car Loan",
+  paymentMethod: "ICICI Bank",
+  amount: 15000,
+  notes: ""
+}, {
+  date: "2026-04-01",
+  type: "Expense",
+  category: "Loan EMI",
+  subcategory: "Kulu",
+  paymentMethod: "ICICI Bank",
+  amount: 20000,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Income",
+  category: "Salary",
+  subcategory: "May salary",
+  paymentMethod: "ICICI Bank",
+  amount: 71854.42,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Income",
+  category: "PF (Employer)",
+  subcategory: "May PF credit",
+  paymentMethod: "ICICI Bank",
+  amount: 5000,
+  notes: ""
+}, {
+  date: "2026-05-05",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "1st-10th",
+  paymentMethod: "Cash",
+  amount: 5844.55,
+  notes: ""
+}, {
+  date: "2026-05-15",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "11th-20th",
+  paymentMethod: "Cash",
+  amount: 5494.70,
+  notes: ""
+}, {
+  date: "2026-05-25",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "21st-30th",
+  paymentMethod: "Cash",
+  amount: 4124.65,
+  notes: ""
+}, {
+  date: "2026-05-10",
+  type: "Income",
+  category: "Loan Received",
+  subcategory: "Personal loan disbursed",
+  paymentMethod: "ICICI Bank",
+  amount: 294690,
+  notes: "ICICI Bank loan"
+}, {
+  date: "2026-05-20",
+  type: "Expense",
+  category: "Medical",
+  subcategory: "21st-31st",
+  paymentMethod: "Cash",
+  amount: 3000,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Expense",
+  category: "Rent",
+  subcategory: "May rent",
+  paymentMethod: "ICICI Bank",
+  amount: 5000,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Expense",
+  category: "Maintenance",
+  subcategory: "May maintenance",
+  paymentMethod: "ICICI Bank",
+  amount: 1950,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Expense",
+  category: "Electricity",
+  subcategory: "May electricity bill",
+  paymentMethod: "ICICI Bank",
+  amount: 310,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Expense",
+  category: "Milk",
+  subcategory: "May milk purchase",
+  paymentMethod: "Cash",
+  amount: 744,
+  notes: ""
+}, {
+  date: "2026-05-01",
+  type: "Expense",
+  category: "Subscriptions",
+  subcategory: "Spotify",
+  paymentMethod: "ICICI Credit Card",
+  amount: 139,
+  notes: ""
+}, {
+  date: "2026-05-17",
+  type: "Expense",
+  category: "Mobile Recharge",
+  subcategory: "May recharge",
+  paymentMethod: "ICICI Bank",
+  amount: 78,
+  notes: ""
+}, {
+  date: "2026-05-17",
+  type: "Expense",
+  category: "Money Sent",
+  subcategory: "15th-20th",
+  paymentMethod: "ICICI Bank",
+  amount: 5000,
+  notes: ""
+}, {
+  date: "2026-06-05",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "1st-10th",
+  paymentMethod: "Cash",
+  amount: 4430.75,
+  notes: ""
+}, {
+  date: "2026-06-15",
+  type: "Income",
+  category: "Cow Milk Sale",
+  subcategory: "11th-20th",
+  paymentMethod: "Cash",
+  amount: 4121.05,
+  notes: ""
+}, {
+  date: "2026-06-10",
+  type: "Income",
+  category: "Loan Received",
+  subcategory: "L&T loan disbursed",
+  paymentMethod: "ICICI Bank",
+  amount: 292273.80,
+  notes: "L&T Finance loan"
+}, {
+  date: "2026-06-01",
+  type: "Expense",
+  category: "Rent",
+  subcategory: "June rent",
+  paymentMethod: "ICICI Bank",
+  amount: 10000,
+  notes: ""
+}, {
+  date: "2026-06-01",
+  type: "Expense",
+  category: "Water",
+  subcategory: "June water bill",
+  paymentMethod: "ICICI Bank",
+  amount: 400,
+  notes: ""
+}, {
+  date: "2026-06-01",
+  type: "Expense",
+  category: "Maintenance",
+  subcategory: "June maintenance",
+  paymentMethod: "ICICI Bank",
+  amount: 1000,
+  notes: ""
+}, {
+  date: "2026-06-01",
+  type: "Expense",
+  category: "Subscriptions",
+  subcategory: "Spotify",
+  paymentMethod: "ICICI Credit Card",
+  amount: 139,
+  notes: ""
+}, {
+  date: "2026-06-10",
+  type: "Expense",
+  category: "Metro Recharge",
+  subcategory: "8th-14th",
+  paymentMethod: "ICICI Bank",
+  amount: 1300,
+  notes: ""
+}, {
+  date: "2026-06-01",
+  type: "Expense",
+  category: "Loan EMI",
+  subcategory: "Kulu",
+  paymentMethod: "ICICI Bank",
+  amount: 20000,
+  notes: ""
+}, {
+  date: "2026-04-15",
+  type: "Investment",
+  category: "Livestock - Cow",
+  subcategory: "New milking cow purchased",
+  paymentMethod: "Cash",
+  amount: 45000,
+  notes: "",
+  currentValue: 45000
+}];
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+function uid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+function formatINR(n) {
+  const num = Number(n) || 0;
+  const neg = num < 0;
+  const abs = Math.abs(num);
+  const parts = abs.toFixed(2).split(".");
+  let intPart = parts[0];
+  let lastThree = intPart.slice(-3);
+  let other = intPart.slice(0, -3);
+  if (other !== "") lastThree = "," + lastThree;
+  const formatted = other.replace(/\B(?=(\d{2})+(?!\d))/g, ",") + lastThree;
+  return (neg ? "-" : "") + "\u20B9" + formatted;
+}
+function formatINRShort(n) {
+  const num = Number(n) || 0;
+  const abs = Math.abs(num);
+  if (abs >= 10000000) return (num / 10000000).toFixed(2) + "Cr";
+  if (abs >= 100000) return (num / 100000).toFixed(2) + "L";
+  if (abs >= 1000) return (num / 1000).toFixed(1) + "k";
+  return num.toFixed(0);
+}
+function monthKey(dateStr) {
+  return dateStr.slice(0, 7);
+} // YYYY-MM
+function fyMonthLabel(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    year: "2-digit"
+  });
+}
+function fmtDateHuman(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+}
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function fyRange(fyStartYear) {
+  return {
+    start: `${fyStartYear}-04-01`,
+    end: `${fyStartYear + 1}-03-31`
+  };
+}
+function fyMonths(fyStartYear) {
+  const months = [];
+  for (let i = 0; i < 12; i++) {
+    const y = i < 9 ? fyStartYear : fyStartYear + 1;
+    const m = (3 + i) % 12 + 1;
+    months.push(`${y}-${String(m).padStart(2, "0")}`);
+  }
+  return months;
+}
+function calcEMI(principal, ratePct, tenureMonths) {
+  if (!principal || principal <= 0 || !tenureMonths) return 0;
+  const r = ratePct / 100 / 12;
+  if (r === 0) return principal / tenureMonths;
+  const pow = Math.pow(1 + r, tenureMonths);
+  return principal * r * pow / (pow - 1);
+}
+function paymentMethodsFor(type, settings) {
+  const base = ["Cash", settings.bank1Name, settings.bank2Name];
+  if (type === "Income") return base;
+  return [...base, ...CARD_NAMES];
+}
+function categoriesFor(type) {
+  if (type === "Income") return INCOME_CATEGORIES;
+  if (type === "Expense") return EXPENSE_CATEGORIES;
+  if (type === "Investment") return INVESTMENT_TYPES;
+  if (type === "Transfer") return TRANSFER_CATEGORIES;
+  if (type === "Loan Payment") return ["Loan EMI"];
+  return [];
+}
+
+/* ============================================================
+   GOOGLE SHEETS BACKEND
+   Data lives in ONE Google Sheet you own.
+   Sheets structure:
+     "Transactions"  â€“ one row per transaction
+     "Loans"         â€“ one row per loan
+     "Settings"      â€“ key/value rows (bank names, card config, etc.)
+     "Budgets"       â€“ category/amount rows
+   ============================================================ */
+
+// TODO: paste your Google Cloud OAuth 2.0 Web Client ID here (see HOW_TO_INSTALL.txt).
+const GOOG_CLIENT_ID = "268317691803-ucr4tm8s5mb6im0b4kt9mna4qd9k0i5t.apps.googleusercontent.com";
+// TODO: paste your Spreadsheet ID here (the long string in the Sheet's URL).
+const SPREADSHEET_ID = "12Y1fQFGMaFOkc6HhlX5zjw-HtcmzI_nF3kRp_2yuVWU";
+const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
+
+// TODO: Add your email address as the owner
+const OWNER_EMAIL = "santheeps987@gmail.com"; // Replace with your actual email
+
+/* ---- Google Identity Services (GIS) token client ---- */
+let _tokenClient = null;
+let _accessToken = null;
+let _userEmail = null;
+let _authListeners = [];
+function notifyAuth() {
+  _authListeners.forEach(cb => cb(_accessToken ? {
+    token: _accessToken,
+    email: _userEmail
+  } : null));
+}
+function initGIS() {
+  return new Promise(resolve => {
+    if (window.google && window.google.accounts) {
+      resolve();
+      return;
+    }
+    const check = setInterval(() => {
+      if (window.google && window.google.accounts) {
+        clearInterval(check);
+        resolve();
+      }
+    }, 100);
+  });
+}
+async function ensureTokenClient() {
+  await initGIS();
+  if (_tokenClient) return;
+  _tokenClient = window.google.accounts.oauth2.initTokenClient({
+    client_id: GOOG_CLIENT_ID,
+    scope: SCOPES,
+    callback: async resp => {
+      if (resp.error) {
+        console.error("GIS error:", resp.error);
+        return;
+      }
+      _accessToken = resp.access_token;
+      // Fetch user email
+      try {
+        const userResp = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { Authorization: `Bearer ${_accessToken}` }
+        });
+        const userData = await userResp.json();
+        _userEmail = userData.email;
+      } catch (e) {
+        console.error("Failed to fetch user email:", e);
+      }
+      // save token + expiry (GIS tokens typically last 3600 s)
+      const expiry = Date.now() + (resp.expires_in || 3600) * 1000 - 60000;
+      try {
+        sessionStorage.setItem("gls_tok", JSON.stringify({
+          token: _accessToken,
+          email: _userEmail,
+          expiry
+        }));
+      } catch (e) {}
+      notifyAuth();
+    }
+  });
+}
+function tryRestoreToken() {
+  try {
+    const raw = sessionStorage.getItem("gls_tok");
+    if (!raw) return;
+    const {
+      token,
+      email,
+      expiry
+    } = JSON.parse(raw);
+    if (Date.now() < expiry) {
+      _accessToken = token;
+      _userEmail = email;
+    }
+  } catch (e) {}
+}
+async function signIn() {
+  await ensureTokenClient();
+  // If we already have a valid token, just notify.
+  if (_accessToken) {
+    notifyAuth();
+    return;
+  }
+  _tokenClient.requestAccessToken({
+    prompt: "consent"
+  });
+}
+async function signOutUser() {
+  if (_accessToken) {
+    window.google?.accounts?.oauth2?.revoke?.(_accessToken, () => {});
+    _accessToken = null;
+    _userEmail = null;
+  }
+  try {
+    sessionStorage.removeItem("gls_tok");
+  } catch (e) {}
+  notifyAuth();
+}
+function onAuthChange(cb) {
+  _authListeners.push(cb);
+  cb(_accessToken ? {
+    token: _accessToken,
+    email: _userEmail
+  } : null); // fire immediately
+  return () => {
+    _authListeners = _authListeners.filter(l => l !== cb);
+  };
+}
+function isOwner() {
+  return _userEmail && _userEmail.toLowerCase() === OWNER_EMAIL.toLowerCase();
+}
+function getUserRole() {
+  return isOwner() ? 'owner' : 'family';
+}
+
+/* ---- Sheets API helpers ---- */
+async function sheetsRequest(method, path, body) {
+  if (!_accessToken) throw new Error("Not signed in");
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}${path}`;
+  const resp = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${_accessToken}`,
+      "Content-Type": "application/json"
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if (!resp.ok) {
+    const text = await resp.text();
+    // Token expired mid-session: clear + prompt re-auth
+    if (resp.status === 401) {
+      _accessToken = null;
+      sessionStorage.removeItem("gls_tok");
+      notifyAuth();
+    }
+    throw new Error(`Sheets API ${resp.status}: ${text}`);
+  }
+  return resp.status === 204 ? null : resp.json();
+}
+async function getRange(range) {
+  const data = await sheetsRequest("GET", `/values/${encodeURIComponent(range)}`);
+  return data?.values || [];
+}
+async function appendRows(sheetName, rows) {
+  await sheetsRequest("POST", `/values/${encodeURIComponent(sheetName + "!A1")}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+    values: rows
+  });
+}
+async function clearAndWrite(sheetName, rows) {
+  await sheetsRequest("PUT", `/values/${encodeURIComponent(sheetName + "!A1")}?valueInputOption=USER_ENTERED`, {
+    values: rows
+  });
+}
+
+/* ---- Ensure all required sheets exist ---- */
+async function ensureSheets() {
+  const meta = await sheetsRequest("GET", "?fields=sheets.properties.title");
+  const existing = new Set((meta.sheets || []).map(s => s.properties.title));
+  const needed = ["Transactions", "Loans", "Settings", "Budgets"];
+  const missing = needed.filter(n => !existing.has(n));
+  if (missing.length === 0) return;
+  await sheetsRequest("POST", ":batchUpdate", {
+    requests: missing.map(title => ({
+      addSheet: {
+        properties: {
+          title
+        }
+      }
+    }))
+  });
+}
+
+/* ---- Parse/serialize helpers ---- */
+const TX_HEADERS = ["id", "date", "type", "category", "subcategory", "paymentMethod", "amount", "notes", "addedBy", "timestamp"];
+const LOAN_HEADERS = ["id", "name", "lender", "principal", "rate", "tenureMonths", "startDate", "dueDay"];
+function rowToObj(headers, row) {
+  const obj = {};
+  headers.forEach((h, i) => {
+    obj[h] = row[i] ?? "";
+  });
+  if (obj.amount !== undefined) obj.amount = parseFloat(obj.amount) || 0;
+  if (obj.principal !== undefined) obj.principal = parseFloat(obj.principal) || 0;
+  if (obj.rate !== undefined) obj.rate = parseFloat(obj.rate) || 0;
+  if (obj.tenureMonths !== undefined) obj.tenureMonths = parseInt(obj.tenureMonths) || 0;
+  if (obj.dueDay !== undefined) obj.dueDay = parseInt(obj.dueDay) || 1;
+  return obj;
+}
+function objToRow(headers, obj) {
+  return headers.map(h => obj[h] ?? "");
+}
+
+/* ---- Seed check ---- */
+async function ensureSeeded() {
+  const rows = await getRange("Transactions!A1:A2");
+  if (rows.length > 1) return; // already has data
+  // Write headers
+  await clearAndWrite("Transactions", [TX_HEADERS]);
+  await clearAndWrite("Loans", [LOAN_HEADERS]);
+  await clearAndWrite("Settings", [["key", "value"]]);
+  await clearAndWrite("Budgets", [["category", "amount"]]);
+  // Seed historical transactions
+  const txRows = SEED_TRANSACTIONS.map(t => objToRow(TX_HEADERS, {
+    ...t,
+    id: uid(),
+    addedBy: "Seed",
+    timestamp: new Date().toISOString()
+  }));
+  await appendRows("Transactions", txRows);
+  // Seed loans
+  const loanRows = DEFAULT_LOANS.map(l => objToRow(LOAN_HEADERS, l));
+  await appendRows("Loans", loanRows);
+  // Seed settings (bank names, fy year)
+  await appendRows("Settings", [["bank1Name", DEFAULT_SETTINGS.bank1Name], ["bank2Name", DEFAULT_SETTINGS.bank2Name], ["fyStartYear", String(DEFAULT_SETTINGS.fyStartYear)]]);
+}
+
+/* ---- Read functions ---- */
+async function fetchTransactions() {
+  const rows = await getRange("Transactions!A2:J10000");
+  return rows.map(r => rowToObj(TX_HEADERS, r)).filter(t => t.id);
+}
+async function fetchLoans() {
+  const rows = await getRange("Loans!A2:H100");
+  return rows.map(r => rowToObj(LOAN_HEADERS, r)).filter(l => l.id);
+}
+async function fetchSettings() {
+  const rows = await getRange("Settings!A2:B100");
+  const s = {
+    ...DEFAULT_SETTINGS
+  };
+  rows.forEach(([k, v]) => {
+    if (k) s[k] = isNaN(v) ? v : Number(v) || v;
+  });
+  return s;
+}
+async function fetchBudgets() {
+  const rows = await getRange("Budgets!A2:B100");
+  const b = {};
+  rows.forEach(([cat, amt]) => {
+    if (cat) b[cat] = parseFloat(amt) || 0;
+  });
+  return b;
+}
+
+/* ---- Write functions ---- */
+async function addTransactionRemote(t) {
+  const row = objToRow(TX_HEADERS, t);
+  await appendRows("Transactions", [row]);
+}
+async function deleteTransactionRemote(id, allTx) {
+  // Rewrite the full transactions sheet (simpler + more reliable than row-index deletion)
+  const remaining = allTx.filter(t => t.id !== id);
+  const rows = [TX_HEADERS, ...remaining.map(t => objToRow(TX_HEADERS, t))];
+  await clearAndWrite("Transactions", rows);
+}
+async function setLoansRemote(loans) {
+  const rows = [LOAN_HEADERS, ...loans.map(l => objToRow(LOAN_HEADERS, l))];
+  await clearAndWrite("Loans", rows);
+}
+async function setSettingsRemote(settings) {
+  const rows = [["key", "value"], ...Object.entries(settings).map(([k, v]) => [k, String(v)])];
+  await clearAndWrite("Settings", rows);
+}
+async function setBudgetsRemote(budgets) {
+  const rows = [["category", "amount"], ...Object.entries(budgets).map(([k, v]) => [k, String(v)])];
+  await clearAndWrite("Budgets", rows);
+}
+function currentUserLabel() {
+  return "Household";
+}
+
+/* ============================================================
+   SMALL UI PRIMITIVES
+
+   ============================================================ */
+function StatCard({
+  icon,
+  label,
+  value,
+  subtitle,
+  color,
+  bgColor
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: bgColor || COLOR.white,
+      borderRadius: 12,
+      border: `1px solid ${COLOR.rule}`,
+      padding: "16px",
+      flex: 1,
+      minWidth: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2",
+    style: {
+      marginBottom: 8
+    }
+  }, icon && /*#__PURE__*/React.createElement("div", {
+    style: {
+      color: color || COLOR.ink
+    }
+  }, icon), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      fontWeight: 700,
+      letterSpacing: "0.05em",
+      color: COLOR.mutedInk,
+      textTransform: "uppercase"
+    }
+  }, label)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 24,
+      fontWeight: 600,
+      color: color || COLOR.ink,
+      marginBottom: 2,
+      fontVariantNumeric: "tabular-nums"
+    }
+  }, value), subtitle && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk
+    }
+  }, subtitle));
+}
+function LedgerStitch({
+  color = COLOR.marigold
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 0,
+      borderTop: `2px dashed ${color}`,
+      opacity: 0.6,
+      margin: "10px 0"
+    }
+  });
+}
+function Screen({
+  title,
+  subtitle,
+  right,
+  children
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-col h-full"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "20px 20px 12px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h1", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      color: COLOR.ink,
+      fontSize: 26,
+      fontWeight: 600,
+      lineHeight: 1.1
+    }
+  }, title), subtitle && /*#__PURE__*/React.createElement("p", {
+    style: {
+      fontFamily: FONT_BODY,
+      color: COLOR.mutedInk,
+      fontSize: 13,
+      marginTop: 4
+    }
+  }, subtitle)), right)), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 overflow-y-auto",
+    style: {
+      padding: "0 20px 100px"
+    }
+  }, children));
+}
+function Card({
+  children,
+  style
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: COLOR.white,
+      borderRadius: 14,
+      border: `1px solid ${COLOR.rule}`,
+      padding: 16,
+      marginBottom: 14,
+      ...style
+    }
+  }, children);
+}
+function SectionLabel({
+  children
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      fontWeight: 700,
+      letterSpacing: "0.08em",
+      color: COLOR.mutedInk,
+      textTransform: "uppercase",
+      marginBottom: 8
+    }
+  }, children);
+}
+function ProgressBar({
+  pct,
+  color
+}) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 6,
+      borderRadius: 4,
+      background: COLOR.paperDeep,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: `${clamped}%`,
+      height: "100%",
+      background: color,
+      transition: "width 0.3s"
+    }
+  }));
+}
+function Pill({
+  children,
+  color,
+  bg
+}) {
+  return /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      fontWeight: 600,
+      color,
+      background: bg,
+      padding: "3px 9px",
+      borderRadius: 999,
+      whiteSpace: "nowrap"
+    }
+  }, children);
+}
+function SelectField({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder = "Select..."
+}) {
+  return /*#__PURE__*/React.createElement("label", {
+    className: "block",
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 600,
+      color: COLOR.inkSoft,
+      marginBottom: 5
+    }
+  }, label), /*#__PURE__*/React.createElement("select", {
+    value: value,
+    onChange: e => onChange(e.target.value),
+    style: {
+      width: "100%",
+      fontFamily: FONT_BODY,
+      fontSize: 15,
+      color: COLOR.ink,
+      background: COLOR.paper,
+      border: `1px solid ${COLOR.rule}`,
+      borderRadius: 10,
+      padding: "10px 12px",
+      appearance: "none"
+    }
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, placeholder), options.map(o => /*#__PURE__*/React.createElement("option", {
+    key: o,
+    value: o
+  }, o))));
+}
+function TextField({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+  prefix
+}) {
+  return /*#__PURE__*/React.createElement("label", {
+    className: "block",
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 600,
+      color: COLOR.inkSoft,
+      marginBottom: 5
+    }
+  }, label), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center",
+    style: {
+      background: COLOR.paper,
+      border: `1px solid ${COLOR.rule}`,
+      borderRadius: 10,
+      padding: "0 12px"
+    }
+  }, prefix && /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      color: COLOR.mutedInk,
+      marginRight: 4
+    }
+  }, prefix), /*#__PURE__*/React.createElement("input", {
+    type: type,
+    value: value,
+    onChange: e => onChange(e.target.value),
+    placeholder: placeholder,
+    style: {
+      width: "100%",
+      fontFamily: FONT_BODY,
+      fontSize: 15,
+      color: COLOR.ink,
+      background: "transparent",
+      border: "none",
+      outline: "none",
+      padding: "10px 0"
+    }
+  })));
+}
+function TypeChip({
+  active,
+  label,
+  color,
+  onClick
+}) {
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      fontWeight: 600,
+      padding: "8px 6px",
+      borderRadius: 10,
+      border: `1.5px solid ${active ? color : COLOR.rule}`,
+      background: active ? color : "transparent",
+      color: active ? COLOR.white : COLOR.inkSoft,
+      transition: "all 0.15s",
+      cursor: "pointer"
+    }
+  }, label);
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function Dashboard({
+  transactions,
+  loans,
+  settings,
+  budgets,
+  goToTab,
+  userRole
+}) {
+  const {
+    start,
+    end
+  } = fyRange(settings.fyStartYear);
+  const thisMonthKey = monthKey(todayISO());
+  const monthTx = transactions.filter(t => monthKey(t.date) === thisMonthKey);
+  const fyTx = transactions.filter(t => t.date >= start && t.date <= end);
+  const monthIncome = monthTx.filter(t => t.type === "Income").reduce((s, t) => s + t.amount, 0);
+  const monthExpense = monthTx.filter(t => t.type === "Expense").reduce((s, t) => s + t.amount, 0);
+  const monthNet = monthIncome - monthExpense;
+  const savingsRate = monthIncome > 0 ? monthNet / monthIncome * 100 : 0;
+  const months = fyMonths(settings.fyStartYear);
+  const trendData = months.map(mk => {
+    const tx = transactions.filter(t => monthKey(t.date) === mk);
+    const inc = tx.filter(t => t.type === "Income").reduce((s, t) => s + t.amount, 0);
+    const exp = tx.filter(t => t.type === "Expense").reduce((s, t) => s + t.amount, 0);
+    const label = fyMonthLabel(mk + "-01");
+    return {
+      month: label,
+      Income: Math.round(inc),
+      Expense: Math.round(exp)
+    };
+  });
+  const expenseByCat = {};
+  fyTx.filter(t => t.type === "Expense").forEach(t => {
+    expenseByCat[t.category] = (expenseByCat[t.category] || 0) + t.amount;
+  });
+  const topCats = Object.entries(expenseByCat).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const maxCat = topCats.length ? topCats[0][1] : 1;
+  const totalEMI = loans.reduce((s, l) => s + calcEMI(l.principal, l.rate, l.tenureMonths), 0);
+  const totalOutstanding = loans.reduce((s, l) => {
+    const paid = transactions.filter(t => t.type === "Expense" && t.category === "Loan EMI" && t.subcategory === l.name).reduce((ss, t) => ss + t.amount, 0);
+    return s + Math.max(l.principal - paid, 0);
+  }, 0);
+  const cardUtil = settings.cards.map(c => {
+    const spend = fyTx.filter(t => t.type === "Expense" && t.paymentMethod === c.name).reduce((s, t) => s + t.amount, 0);
+    return {
+      ...c,
+      spend,
+      pct: c.creditLimit ? spend / c.creditLimit * 100 : 0
+    };
+  });
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  // Calculate farm metrics
+  const farmIncome = fyTx.filter(t => t.type === "Income" && t.category === "Farm Income").reduce((s, t) => s + t.amount, 0);
+  const farmExpense = fyTx.filter(t => t.type === "Expense" && t.category === "Farm Expense").reduce((s, t) => s + t.amount, 0);
+  const farmNet = farmIncome - farmExpense;
+
+  // Family members only see loans + farm
+  if (userRole === 'family') {
+    return /*#__PURE__*/React.createElement(Screen, {
+      title: greeting,
+      subtitle: "Family Dashboard"
+    }, /*#__PURE__*/React.createElement(Card, {
+      style: {
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        border: "none",
+        color: "#fff"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 12,
+        fontWeight: 600,
+        letterSpacing: "0.05em",
+        opacity: 0.9,
+        textTransform: "uppercase"
+      }
+    }, "ðŸ‘¤ Family Member Access"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 14,
+        marginTop: 6,
+        opacity: 0.85
+      }
+    }, "You can view loans and add farm entries")), /*#__PURE__*/React.createElement("div", {
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(2, 1fr)",
+        gap: 12,
+        marginBottom: 16
+      }
+    }, /*#__PURE__*/React.createElement(StatCard, {
+      icon: "ðŸ’°",
+      label: "Active Loans",
+      value: loans.filter(l => {
+        const paid = transactions.filter(t => t.type === "Expense" && t.category === "Loan EMI" && t.subcategory === l.name).reduce((s, t) => s + t.amount, 0);
+        return l.principal - paid > 0;
+      }).length.toString(),
+      subtitle: "Total loans",
+      color: COLOR.ink,
+      bgColor: "#F8F9FA"
+    }), /*#__PURE__*/React.createElement(StatCard, {
+      icon: "ðŸ“…",
+      label: "Monthly EMI",
+      value: formatINRShort(totalEMI),
+      subtitle: "Per month",
+      color: COLOR.ink,
+      bgColor: "#F8F9FA"
+    }), /*#__PURE__*/React.createElement(StatCard, {
+      icon: "ðŸŒ±",
+      label: "Farm Income",
+      value: formatINRShort(farmIncome),
+      subtitle: "This FY",
+      color: COLOR.banyan,
+      bgColor: "#DCEBE1"
+    }), /*#__PURE__*/React.createElement(StatCard, {
+      icon: "ðŸšœ",
+      label: "Farm Expense",
+      value: formatINRShort(farmExpense),
+      subtitle: "This FY",
+      color: COLOR.brick,
+      bgColor: "#FCE4E4"
+    })), /*#__PURE__*/React.createElement(Card, {
+      style: {
+        background: COLOR.ink,
+        border: "none",
+        textAlign: "center",
+        padding: "24px 16px"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 11,
+        color: "#B9C0CE",
+        textTransform: "uppercase",
+        letterSpacing: "0.08em",
+        marginBottom: 8
+      }
+    }, "Total Outstanding"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_DISPLAY,
+        fontSize: 36,
+        fontWeight: 600,
+        color: COLOR.white,
+        fontVariantNumeric: "tabular-nums"
+      }
+    }, formatINR(totalOutstanding))), loans.map(l => {
+      const emi = calcEMI(l.principal, l.rate, l.tenureMonths);
+      const paid = transactions.filter(t => t.type === "Expense" && t.category === "Loan EMI" && t.subcategory === l.name).reduce((s, t) => s + t.amount, 0);
+      const outstanding = Math.max(l.principal - paid, 0);
+      const status = outstanding <= 0 ? "Closed" : "Active";
+      const paymentProgress = l.principal > 0 ? paid / l.principal * 100 : 0;
+      return /*#__PURE__*/React.createElement(Card, {
+        key: l.id
+      }, /*#__PURE__*/React.createElement("div", {
+        className: "flex justify-between items-start",
+        style: {
+          marginBottom: 12
+        }
+      }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_DISPLAY,
+          fontSize: 18,
+          fontWeight: 600,
+          color: COLOR.ink
+        }
+      }, l.name), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_BODY,
+          fontSize: 13,
+          color: COLOR.mutedInk,
+          marginTop: 2
+        }
+      }, l.lender)), /*#__PURE__*/React.createElement(Pill, {
+        color: status === "Active" ? "#8A6D1E" : COLOR.banyan,
+        bg: status === "Active" ? "#F4E7C4" : "#DCEBE1"
+      }, status)), /*#__PURE__*/React.createElement("div", {
+        style: {
+          marginBottom: 12
+        }
+      }, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_BODY,
+          fontSize: 11,
+          color: COLOR.mutedInk,
+          marginBottom: 6
+        }
+      }, "Payment Progress: ", paymentProgress.toFixed(0), "%"), /*#__PURE__*/React.createElement(ProgressBar, {
+        pct: paymentProgress,
+        color: COLOR.banyan
+      })), /*#__PURE__*/React.createElement("div", {
+        className: "grid grid-cols-2 gap-3"
+      }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_BODY,
+          fontSize: 10,
+          color: COLOR.mutedInk,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em"
+        }
+      }, "EMI"), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_DISPLAY,
+          fontSize: 16,
+          fontWeight: 600,
+          color: COLOR.ink,
+          marginTop: 4
+        }
+      }, formatINRShort(emi))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_BODY,
+          fontSize: 10,
+          color: COLOR.mutedInk,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em"
+        }
+      }, "Outstanding"), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_DISPLAY,
+          fontSize: 16,
+          fontWeight: 600,
+          color: COLOR.brick,
+          marginTop: 4
+        }
+      }, formatINRShort(outstanding))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_BODY,
+          fontSize: 10,
+          color: COLOR.mutedInk,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em"
+        }
+      }, "Paid"), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_DISPLAY,
+          fontSize: 16,
+          fontWeight: 600,
+          color: COLOR.banyan,
+          marginTop: 4
+        }
+      }, formatINRShort(paid))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_BODY,
+          fontSize: 10,
+          color: COLOR.mutedInk,
+          textTransform: "uppercase",
+          letterSpacing: "0.05em"
+        }
+      }, "Rate"), /*#__PURE__*/React.createElement("div", {
+        style: {
+          fontFamily: FONT_DISPLAY,
+          fontSize: 16,
+          fontWeight: 600,
+          color: COLOR.ink,
+          marginTop: 4
+        }
+      }, l.rate, "%"))));
+    }), /*#__PURE__*/React.createElement(Card, {
+      style: {
+        textAlign: "center",
+        padding: "20px"
+      }
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => goToTab("farm"),
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 15,
+        fontWeight: 600,
+        color: "#fff",
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        border: "none",
+        borderRadius: 8,
+        padding: "12px 24px",
+        cursor: "pointer"
+      }
+    }, "ðŸŒ± Add Farm Entry")));
+  }
+
+  // Owner gets full dashboard with modern design
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: greeting,
+    subtitle: new Date().toLocaleDateString("en-GB", {
+      weekday: "long",
+      day: "numeric",
+      month: "long"
+    })
+  }, /*#__PURE__*/React.createElement(Card, {
+    style: {
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      border: "none",
+      padding: "20px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 700,
+      letterSpacing: "0.08em",
+      color: "rgba(255,255,255,0.85)",
+      textTransform: "uppercase"
+    }
+  }, "This month's net income"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 38,
+      fontWeight: 600,
+      color: "#fff",
+      marginTop: 8,
+      marginBottom: 16,
+      fontVariantNumeric: "tabular-nums"
+    }
+  }, formatINR(monthNet)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(3, 1fr)",
+      gap: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: "rgba(255,255,255,0.75)",
+      textTransform: "uppercase",
+      letterSpacing: "0.05em"
+    }
+  }, "Income"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 18,
+      fontWeight: 700,
+      color: "#8FD4A8",
+      marginTop: 4
+    }
+  }, formatINRShort(monthIncome))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: "rgba(255,255,255,0.75)",
+      textTransform: "uppercase",
+      letterSpacing: "0.05em"
+    }
+  }, "Expense"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 18,
+      fontWeight: 700,
+      color: "#E29289",
+      marginTop: 4
+    }
+  }, formatINRShort(monthExpense))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: "rgba(255,255,255,0.75)",
+      textTransform: "uppercase",
+      letterSpacing: "0.05em"
+    }
+  }, "Savings"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 18,
+      fontWeight: 700,
+      color: COLOR.marigold,
+      marginTop: 4
+    }
+  }, savingsRate.toFixed(0), "%")))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, 1fr)",
+      gap: 12,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement(StatCard, {
+    icon: "ðŸ’°",
+    label: "Total Loans",
+    value: formatINRShort(totalOutstanding),
+    subtitle: loans.length + " active",
+    color: COLOR.brick,
+    bgColor: "#FCE4E4"
+  }), /*#__PURE__*/React.createElement(StatCard, {
+    icon: "ðŸŒ±",
+    label: "Farm Net",
+    value: formatINRShort(farmNet),
+    subtitle: "This FY",
+    color: farmNet >= 0 ? COLOR.banyan : COLOR.brick,
+    bgColor: farmNet >= 0 ? "#DCEBE1" : "#FCE4E4"
+  }))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "Income vs expense â€” FY ", settings.fyStartYear, "-", String(settings.fyStartYear + 1).slice(2)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: "100%"
+    }
+  }, /*#__PURE__*/React.createElement(MiniBarChart, {
+    data: trendData,
+    height: 150
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-4",
+    style: {
+      marginTop: 4
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "flex items-center gap-1.5",
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: 2,
+      background: COLOR.banyanSoft,
+      display: "inline-block"
+    }
+  }), " Income"), /*#__PURE__*/React.createElement("span", {
+    className: "flex items-center gap-1.5",
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 8,
+      height: 8,
+      borderRadius: 2,
+      background: COLOR.brickSoft,
+      display: "inline-block"
+    }
+  }), " Expense"))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "Where this year's money went"), topCats.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.mutedInk
+    }
+  }, "No expenses logged yet."), topCats.map(([cat, amt]) => /*#__PURE__*/React.createElement("div", {
+    key: cat,
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between",
+    style: {
+      marginBottom: 3
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.ink
+    }
+  }, cat), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      fontWeight: 600,
+      color: COLOR.ink,
+      fontVariantNumeric: "tabular-nums"
+    }
+  }, formatINRShort(amt))), /*#__PURE__*/React.createElement(ProgressBar, {
+    pct: amt / maxCat * 100,
+    color: COLOR.brick
+  })))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement(SectionLabel, null, "Credit cards"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("cards"),
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.brick,
+      fontWeight: 600
+    }
+  }, "View all")), cardUtil.map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.name,
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between",
+    style: {
+      marginBottom: 3
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.ink
+    }
+  }, c.name.replace(" Credit Card", "")), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.mutedInk
+    }
+  }, formatINRShort(c.spend), " / ", formatINRShort(c.creditLimit))), /*#__PURE__*/React.createElement(ProgressBar, {
+    pct: c.pct,
+    color: c.pct > 80 ? COLOR.brick : COLOR.marigold
+  })))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement(SectionLabel, null, "Loans"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("loans"),
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.brick,
+      fontWeight: 600
+    }
+  }, "View all")), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk
+    }
+  }, "Monthly EMI"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 18,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, formatINR(totalEMI))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "right"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk
+    }
+  }, "Outstanding"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 18,
+      fontWeight: 600,
+      color: COLOR.brick
+    }
+  }, formatINR(totalOutstanding))))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between",
+    style: {
+      marginBottom: 6
+    }
+  }, /*#__PURE__*/React.createElement(SectionLabel, null, "Budget"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("budget"),
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.brick,
+      fontWeight: 600
+    }
+  }, "Manage budget")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.mutedInk
+    }
+  }, "Set monthly limits per category and track how this month compares.")), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: "16px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(2, 1fr)",
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("add"),
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 15,
+      fontWeight: 600,
+      color: "#fff",
+      background: COLOR.banyan,
+      border: "none",
+      borderRadius: 8,
+      padding: "12px 16px",
+      cursor: "pointer"
+    }
+  }, "➕ Quick Add"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("farm"),
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 15,
+      fontWeight: 600,
+      color: "#fff",
+      background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+      border: "none",
+      borderRadius: 8,
+      padding: "12px 16px",
+      cursor: "pointer"
+    }
+  }, "🌱 Farm Entry")));
+}
+
+/* ============================================================
+   ADD ENTRY
+   ============================================================ */
+function AddEntry({
+  settings,
+  loans,
+  onAdd,
+  goToTab
+}) {
+  const [type, setType] = useState("Expense");
+  const [date, setDate] = useState(todayISO());
+  const [category, setCategory] = useState("");
+  const [loanName, setLoanName] = useState("");
+  const [description, setDescription] = useState("");
+  const [payment, setPayment] = useState("");
+  const [amount, setAmount] = useState("");
+  const [notes, setNotes] = useState("");
+  const [toast, setToast] = useState("");
+  const catOptions = type === "Loan Payment" ? ["Loan EMI"] : categoriesFor(type);
+  const payOptions = type === "Loan Payment" ? paymentMethodsFor("Expense", settings) : paymentMethodsFor(type, settings);
+  const loanOptions = loans.map(l => l.name);
+  function resetForm() {
+    setType("Expense");
+    setDate(todayISO());
+    setCategory("");
+    setLoanName("");
+    setDescription("");
+    setPayment("");
+    setAmount("");
+    setNotes("");
+  }
+  function handleSave() {
+    if (!type || !date || !amount) {
+      setToast("Please fill in Entry Type, Date and Amount.");
+      return;
+    }
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) {
+      setToast("Amount must be a positive number.");
+      return;
+    }
+    if (!payment) {
+      setToast("Please choose a Payment Method.");
+      return;
+    }
+    let finalType = type,
+      finalCategory = category,
+      finalSub = description,
+      finalNotes = notes;
+    if (type === "Loan Payment") {
+      if (!loanName) {
+        setToast("Please pick a Loan Name.");
+        return;
+      }
+      finalType = "Expense";
+      finalCategory = "Loan EMI";
+      finalSub = loanName;
+      finalNotes = description ? `${description} - ${notes}` : notes;
+    }
+    onAdd({
+      id: uid(),
+      date,
+      type: finalType,
+      category: finalCategory,
+      subcategory: finalSub,
+      paymentMethod: payment,
+      amount: amt,
+      notes: finalNotes,
+      timestamp: new Date().toISOString()
+    });
+    setToast(`Added to ${finalType}.`);
+    resetForm();
+    setTimeout(() => setToast(""), 2200);
+  }
+  const typeColors = {
+    Income: COLOR.banyan,
+    Expense: COLOR.brick,
+    Investment: COLOR.marigold,
+    "Loan Payment": "#7A5AA8",
+    Transfer: COLOR.inkSoft
+  };
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "Quick Entry",
+    subtitle: "Add one Income, Expense or Investment"
+  }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 600,
+      color: COLOR.inkSoft,
+      marginBottom: 8
+    }
+  }, "Entry Type"), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-3 gap-2",
+    style: {
+      marginBottom: 6
+    }
+  }, QE_TYPES.map(t => /*#__PURE__*/React.createElement(TypeChip, {
+    key: t,
+    active: type === t,
+    label: t === "Loan Payment" ? "Loan" : t,
+    color: typeColors[t],
+    onClick: () => {
+      setType(t);
+      setCategory("");
+      setPayment("");
+    }
+  })))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(TextField, {
+    label: "Date",
+    type: "date",
+    value: date,
+    onChange: setDate
+  }), /*#__PURE__*/React.createElement(SelectField, {
+    label: type === "Loan Payment" ? "Category (fixed)" : "Category",
+    value: category,
+    onChange: setCategory,
+    options: catOptions
+  }), type === "Loan Payment" && /*#__PURE__*/React.createElement(SelectField, {
+    label: "Loan Name",
+    value: loanName,
+    onChange: setLoanName,
+    options: loanOptions,
+    placeholder: "Pick a loan..."
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Subcategory / Description",
+    value: description,
+    onChange: setDescription,
+    placeholder: "e.g. weekly groceries"
+  }), /*#__PURE__*/React.createElement(SelectField, {
+    label: "Payment Method / Account",
+    value: payment,
+    onChange: setPayment,
+    options: payOptions
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Amount (â‚¹)",
+    type: "number",
+    value: amount,
+    onChange: setAmount,
+    placeholder: "0.00",
+    prefix: "â‚¹"
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Notes",
+    value: notes,
+    onChange: setNotes,
+    placeholder: "Optional"
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: handleSave,
+    className: "w-full flex items-center justify-center gap-2",
+    style: {
+      background: COLOR.banyan,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontWeight: 700,
+      fontSize: 15,
+      padding: "14px 0",
+      borderRadius: 12,
+      border: "none",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement(Check, {
+    size: 18
+  }), " Save Entry"), toast && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      padding: "10px 14px",
+      borderRadius: 10,
+      background: COLOR.ink,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      textAlign: "center"
+    }
+  }, toast));
+}
+
+/* ============================================================
+   FARM ENTRY (Integrated from Form.html)
+   ============================================================ */
+function FarmEntry({
+  onAdd,
+  settings
+}) {
+  const [entryType, setEntryType] = useState("");
+  const [date, setDate] = useState(todayISO());
+  const [animalType, setAnimalType] = useState("");
+  const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [amount, setAmount] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
+  const [notes, setNotes] = useState("");
+  const [toast, setToast] = useState("");
+
+  // Farm-specific categories
+  const animalTypes = ["Cow", "Goat", "Hen", "General Farm"];
+  const expenseCategories = ["Feed", "Medicine", "Maintenance", "Equipment", "Labor", "Other Expense"];
+  const incomeCategories = ["Milk Sale", "Egg Sale", "Animal Sale", "Product Sale", "Other Income"];
+  const productionTypes = ["Milk Production", "Egg Production", "Meat Production"];
+
+  const paymentModes = ["Cash", settings.bank1Name, settings.bank2Name, "UPI"];
+
+  function resetForm() {
+    setEntryType("");
+    setDate(todayISO());
+    setAnimalType("");
+    setCategory("");
+    setDescription("");
+    setAmount("");
+    setPaymentMode("");
+    setNotes("");
+  }
+
+  function handleSave() {
+    if (!entryType || !date || !animalType || !amount) {
+      setToast("Please fill Entry Type, Date, Animal Type and Amount.");
+      return;
+    }
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) {
+      setToast("Amount must be a positive number.");
+      return;
+    }
+
+    let finalType, finalCategory, finalSubcategory;
+
+    if (entryType === "Income") {
+      finalType = "Income";
+      finalCategory = category || "Farm Income";
+      finalSubcategory = `${animalType} - ${description || category}`;
+    } else if (entryType === "Expense") {
+      finalType = "Expense";
+      finalCategory = category || "Farm Expense";
+      finalSubcategory = `${animalType} - ${description || category}`;
+    } else if (entryType === "Production Log") {
+      finalType = "Income";
+      finalCategory = category || "Production";
+      finalSubcategory = `${animalType} - ${description || 'Production'}`;
+    }
+
+    onAdd({
+      id: uid(),
+      date,
+      type: finalType,
+      category: finalCategory,
+      subcategory: finalSubcategory,
+      paymentMethod: paymentMode || "Cash",
+      amount: amt,
+      notes: `[Farm Entry: ${animalType}] ${notes}`,
+      timestamp: new Date().toISOString()
+    });
+
+    setToast(`âœ… Farm entry added successfully!`);
+    resetForm();
+    setTimeout(() => setToast(""), 2500);
+  }
+
+  const categoryOptions = entryType === "Income"
+    ? incomeCategories
+    : entryType === "Expense"
+    ? expenseCategories
+    : entryType === "Production Log"
+    ? productionTypes
+    : [];
+
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "ðŸ„ Farm Quick Entry",
+    subtitle: "Track farm income, expenses & production"
+  }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 600,
+      color: COLOR.inkSoft,
+      marginBottom: 8
+    }
+  }, "Entry Type"), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-3 gap-2",
+    style: {
+      marginBottom: 6
+    }
+  }, ["Income", "Expense", "Production Log"].map(t => /*#__PURE__*/React.createElement(TypeChip, {
+    key: t,
+    active: entryType === t,
+    label: t === "Production Log" ? "Production" : t,
+    color: t === "Income" ? COLOR.banyan : t === "Expense" ? COLOR.brick : COLOR.marigold,
+    onClick: () => {
+      setEntryType(t);
+      setCategory("");
+    }
+  })))), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(TextField, {
+    label: "Date",
+    type: "date",
+    value: date,
+    onChange: setDate
+  }), /*#__PURE__*/React.createElement(SelectField, {
+    label: "Animal / Farm Type",
+    value: animalType,
+    onChange: setAnimalType,
+    options: animalTypes
+  }), entryType && /*#__PURE__*/React.createElement(SelectField, {
+    label: "Category / Product",
+    value: category,
+    onChange: setCategory,
+    options: categoryOptions
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Description",
+    value: description,
+    onChange: setDescription,
+    placeholder: "e.g. Morning milk collection"
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: entryType === "Production Log" ? "Quantity (L/Kg/Units)" : "Amount (â‚¹)",
+    type: "number",
+    value: amount,
+    onChange: setAmount,
+    placeholder: "0.00",
+    prefix: entryType === "Production Log" ? "" : "â‚¹"
+  }), entryType !== "Production Log" && /*#__PURE__*/React.createElement(SelectField, {
+    label: "Payment Mode",
+    value: paymentMode,
+    onChange: setPaymentMode,
+    options: paymentModes
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Notes",
+    value: notes,
+    onChange: setNotes,
+    placeholder: "Optional"
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: handleSave,
+    className: "w-full flex items-center justify-center gap-2",
+    style: {
+      background: COLOR.banyan,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontWeight: 700,
+      fontSize: 15,
+      padding: "14px 0",
+      borderRadius: 12,
+      border: "none",
+      cursor: "pointer"
+    }
+  }, /*#__PURE__*/React.createElement(Check, {
+    size: 18
+  }), " Save Farm Entry"), toast && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 12,
+      padding: "10px 14px",
+      borderRadius: 10,
+      background: COLOR.ink,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      textAlign: "center"
+    }
+  }, toast));
+}
+
+/* ============================================================
+   TRANSACTIONS LIST
+   ============================================================ */
+function Transactions({
+  transactions,
+  onDelete
+}) {
+  const [filter, setFilter] = useState("All");
+  const filtered = filter === "All" ? transactions : transactions.filter(t => t.type === filter);
+  const sorted = [...filtered].sort((a, b) => b.date.localeCompare(a.date));
+  const grouped = {};
+  sorted.forEach(t => {
+    (grouped[t.date] = grouped[t.date] || []).push(t);
+  });
+  const typeColor = {
+    Income: COLOR.banyan,
+    Expense: COLOR.brick,
+    Investment: COLOR.marigold,
+    Transfer: COLOR.inkSoft
+  };
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "Transactions",
+    subtitle: `${transactions.length} entries logged`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2",
+    style: {
+      marginBottom: 14,
+      overflowX: "auto",
+      paddingBottom: 2
+    }
+  }, ["All", "Income", "Expense", "Investment", "Transfer"].map(f => /*#__PURE__*/React.createElement("button", {
+    key: f,
+    onClick: () => setFilter(f),
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 600,
+      padding: "6px 12px",
+      borderRadius: 999,
+      border: `1.5px solid ${filter === f ? COLOR.ink : COLOR.rule}`,
+      background: filter === f ? COLOR.ink : "transparent",
+      color: filter === f ? COLOR.white : COLOR.inkSoft,
+      whiteSpace: "nowrap"
+    }
+  }, f))), Object.keys(grouped).length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "40px 0",
+      color: COLOR.mutedInk,
+      fontFamily: FONT_BODY
+    }
+  }, "Nothing here yet. Add your first entry from the + tab."), Object.entries(grouped).map(([date, items]) => /*#__PURE__*/React.createElement("div", {
+    key: date,
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      fontWeight: 700,
+      color: COLOR.mutedInk,
+      textTransform: "uppercase",
+      letterSpacing: "0.06em",
+      marginBottom: 6
+    }
+  }, fmtDateHuman(date)), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: 0
+    }
+  }, items.map((t, i) => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
+    className: "flex items-center justify-between",
+    style: {
+      padding: "12px 14px",
+      borderTop: i === 0 ? "none" : `1px solid ${COLOR.rule}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      minWidth: 0,
+      flex: 1
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      width: 6,
+      height: 6,
+      borderRadius: 999,
+      background: typeColor[t.type] || COLOR.mutedInk,
+      flexShrink: 0
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 14,
+      fontWeight: 600,
+      color: COLOR.ink,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, t.category)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.mutedInk,
+      marginTop: 2,
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap"
+    }
+  }, t.subcategory || t.paymentMethod, " Â· ", t.paymentMethod, t.addedBy ? ` Â· ${t.addedBy}` : "")), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2",
+    style: {
+      flexShrink: 0
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 14,
+      fontWeight: 700,
+      fontVariantNumeric: "tabular-nums",
+      color: t.type === "Income" ? COLOR.banyan : t.type === "Expense" ? COLOR.brick : COLOR.ink
+    }
+  }, t.type === "Income" ? "+" : t.type === "Expense" ? "-" : "", formatINRShort(t.amount)), /*#__PURE__*/React.createElement("button", {
+    onClick: () => onDelete(t.id),
+    style: {
+      color: COLOR.mutedInk,
+      opacity: 0.6
+    }
+  }, /*#__PURE__*/React.createElement(Trash2, {
+    size: 15
+  })))))))));
+}
+
+/* ============================================================
+   CREDIT CARDS
+   ============================================================ */
+function CardsScreen({
+  transactions,
+  settings
+}) {
+  const [active, setActive] = useState(CARD_NAMES[0]);
+  const {
+    start,
+    end
+  } = fyRange(settings.fyStartYear);
+  const cardCfg = settings.cards.find(c => c.name === active);
+  const cardTx = transactions.filter(t => t.type === "Expense" && t.paymentMethod === active && t.date >= start && t.date <= end);
+  const spend = cardTx.reduce((s, t) => s + t.amount, 0);
+  const pct = cardCfg.creditLimit ? spend / cardCfg.creditLimit * 100 : 0;
+  const byCat = {};
+  cardTx.forEach(t => {
+    byCat[t.category] = (byCat[t.category] || 0) + t.amount;
+  });
+  const catList = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const maxCat = catList.length ? catList[0][1] : 1;
+  const recent = [...cardTx].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "Credit Cards",
+    subtitle: "Per-card spend, straight from your entries"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2",
+    style: {
+      marginBottom: 14
+    }
+  }, CARD_NAMES.map(c => /*#__PURE__*/React.createElement("button", {
+    key: c,
+    onClick: () => setActive(c),
+    style: {
+      flex: 1,
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      fontWeight: 700,
+      padding: "9px 4px",
+      borderRadius: 10,
+      border: `1.5px solid ${active === c ? COLOR.brick : COLOR.rule}`,
+      background: active === c ? COLOR.brick : "transparent",
+      color: active === c ? COLOR.white : COLOR.inkSoft
+    }
+  }, c.replace(" Credit Card", "")))), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      background: COLOR.ink,
+      border: "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between items-start"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 10,
+      color: "#B9C0CE",
+      textTransform: "uppercase",
+      letterSpacing: "0.06em"
+    }
+  }, "This FY spend"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 26,
+      fontWeight: 600,
+      color: COLOR.white,
+      fontVariantNumeric: "tabular-nums"
+    }
+  }, formatINR(spend))), /*#__PURE__*/React.createElement(Pill, {
+    color: COLOR.white,
+    bg: "rgba(255,255,255,0.12)"
+  }, pct.toFixed(1), "% used")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 10
+    }
+  }, /*#__PURE__*/React.createElement(ProgressBar, {
+    pct: pct,
+    color: pct > 80 ? "#E29289" : COLOR.marigold
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: "#B9C0CE",
+      marginTop: 6
+    }
+  }, "Limit ", formatINR(cardCfg.creditLimit), " Â· cycle starts day ", cardCfg.cycleStartDay, " of each month")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "Spend by category"), catList.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.mutedInk
+    }
+  }, "Nothing charged to this card yet."), catList.map(([cat, amt]) => /*#__PURE__*/React.createElement("div", {
+    key: cat,
+    style: {
+      marginBottom: 10
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between",
+    style: {
+      marginBottom: 3
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.ink
+    }
+  }, cat), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, formatINRShort(amt))), /*#__PURE__*/React.createElement(ProgressBar, {
+    pct: amt / maxCat * 100,
+    color: COLOR.brick
+  })))), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: 0
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "12px 14px 4px"
+    }
+  }, /*#__PURE__*/React.createElement(SectionLabel, null, "Recent charges")), recent.length === 0 && /*#__PURE__*/React.createElement("div", {
+    style: {
+      padding: "0 14px 14px",
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.mutedInk
+    }
+  }, "None yet."), recent.map((t, i) => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
+    className: "flex justify-between",
+    style: {
+      padding: "10px 14px",
+      borderTop: i === 0 ? "none" : `1px solid ${COLOR.rule}`
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, t.category), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk
+    }
+  }, fmtDateHuman(t.date))), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      fontWeight: 700,
+      color: COLOR.brick
+    }
+  }, formatINRShort(t.amount))))));
+}
+
+/* ============================================================
+   BUDGET
+   ============================================================ */
+function Budget({
+  transactions,
+  budgets,
+  setBudgets
+}) {
+  const thisMonthKey = monthKey(todayISO());
+  const monthTx = transactions.filter(t => t.type === "Expense" && monthKey(t.date) === thisMonthKey);
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState("");
+  const rows = EXPENSE_CATEGORIES.map(cat => {
+    const actual = monthTx.filter(t => t.category === cat).reduce((s, t) => s + t.amount, 0);
+    const budget = budgets[cat] || 0;
+    return {
+      cat,
+      actual,
+      budget,
+      pct: budget > 0 ? actual / budget * 100 : 0
+    };
+  }).filter(r => r.actual > 0 || r.budget > 0);
+  const totalBudget = Object.values(budgets).reduce((s, v) => s + (v || 0), 0);
+  const totalActual = monthTx.reduce((s, t) => s + t.amount, 0);
+  function startEdit(cat) {
+    setEditing(cat);
+    setDraft(String(budgets[cat] || ""));
+  }
+  function commitEdit() {
+    const val = parseFloat(draft) || 0;
+    setBudgets({
+      ...budgets,
+      [editing]: val
+    });
+    setEditing(null);
+  }
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "Budget",
+    subtitle: "This month, by category"
+  }, /*#__PURE__*/React.createElement(Card, {
+    style: {
+      background: COLOR.ink,
+      border: "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 10,
+      color: "#B9C0CE",
+      textTransform: "uppercase"
+    }
+  }, "Budgeted"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 22,
+      color: COLOR.white,
+      fontWeight: 600
+    }
+  }, formatINR(totalBudget))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "right"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 10,
+      color: "#B9C0CE",
+      textTransform: "uppercase"
+    }
+  }, "Spent"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 22,
+      color: totalActual > totalBudget && totalBudget > 0 ? "#E29289" : COLOR.marigold,
+      fontWeight: 600
+    }
+  }, formatINR(totalActual))))), EXPENSE_CATEGORIES.map(cat => {
+    const actual = monthTx.filter(t => t.category === cat).reduce((s, t) => s + t.amount, 0);
+    const budget = budgets[cat] || 0;
+    const pct = budget > 0 ? actual / budget * 100 : 0;
+    const over = budget > 0 && actual > budget;
+    return /*#__PURE__*/React.createElement(Card, {
+      key: cat,
+      style: {
+        marginBottom: 8,
+        padding: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex justify-between items-center",
+      style: {
+        marginBottom: 6
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 13,
+        fontWeight: 600,
+        color: COLOR.ink
+      }
+    }, cat), editing === cat ? /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-1"
+    }, /*#__PURE__*/React.createElement("input", {
+      autoFocus: true,
+      type: "number",
+      value: draft,
+      onChange: e => setDraft(e.target.value),
+      onKeyDown: e => e.key === "Enter" && commitEdit(),
+      style: {
+        width: 70,
+        fontFamily: FONT_BODY,
+        fontSize: 12,
+        border: `1px solid ${COLOR.rule}`,
+        borderRadius: 6,
+        padding: "3px 6px"
+      }
+    }), /*#__PURE__*/React.createElement("button", {
+      onClick: commitEdit,
+      style: {
+        color: COLOR.banyan
+      }
+    }, /*#__PURE__*/React.createElement(Check, {
+      size: 16
+    }))) : /*#__PURE__*/React.createElement("button", {
+      onClick: () => startEdit(cat),
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 12,
+        color: COLOR.brick,
+        fontWeight: 600
+      }
+    }, budget > 0 ? `Budget: ${formatINRShort(budget)}` : "Set budget")), /*#__PURE__*/React.createElement(ProgressBar, {
+      pct: pct,
+      color: over ? COLOR.brick : COLOR.banyan
+    }), /*#__PURE__*/React.createElement("div", {
+      className: "flex justify-between",
+      style: {
+        marginTop: 4
+      }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 11,
+        color: COLOR.mutedInk
+      }
+    }, formatINRShort(actual), " spent"), budget > 0 && /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 11,
+        fontWeight: 600,
+        color: over ? COLOR.brick : COLOR.mutedInk
+      }
+    }, pct.toFixed(0), "% used")));
+  }));
+}
+
+/* ============================================================
+   LOANS
+   ============================================================ */
+function Loans({
+  loans,
+  setLoans,
+  transactions
+}) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({
+    name: "",
+    lender: "",
+    principal: "",
+    rate: "",
+    tenureMonths: "",
+    startDate: todayISO(),
+    dueDay: "1"
+  });
+  function paidSoFar(loanName) {
+    return transactions.filter(t => t.type === "Expense" && t.category === "Loan EMI" && t.subcategory === loanName).reduce((s, t) => s + t.amount, 0);
+  }
+  function addLoan() {
+    if (!form.name || !form.principal) return;
+    setLoans([...loans, {
+      id: uid(),
+      name: form.name,
+      lender: form.lender,
+      principal: parseFloat(form.principal) || 0,
+      rate: parseFloat(form.rate) || 0,
+      tenureMonths: parseInt(form.tenureMonths) || 12,
+      startDate: form.startDate,
+      dueDay: parseInt(form.dueDay) || 1
+    }]);
+    setForm({
+      name: "",
+      lender: "",
+      principal: "",
+      rate: "",
+      tenureMonths: "",
+      startDate: todayISO(),
+      dueDay: "1"
+    });
+    setShowAdd(false);
+  }
+  const totalEMI = loans.reduce((s, l) => s + calcEMI(l.principal, l.rate, l.tenureMonths), 0);
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "Loans",
+    subtitle: `${loans.length} loan${loans.length !== 1 ? "s" : ""} tracked`,
+    right: /*#__PURE__*/React.createElement("button", {
+      onClick: () => setShowAdd(!showAdd),
+      style: {
+        background: showAdd ? COLOR.rule : COLOR.ink,
+        color: showAdd ? COLOR.ink : COLOR.white,
+        borderRadius: 999,
+        padding: "8px 14px",
+        fontFamily: FONT_BODY,
+        fontSize: 12,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        gap: 4
+      }
+    }, showAdd ? /*#__PURE__*/React.createElement(X, {
+      size: 14
+    }) : /*#__PURE__*/React.createElement(Plus, {
+      size: 14
+    }), " ", showAdd ? "Cancel" : "New loan")
+  }, showAdd && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(TextField, {
+    label: "Loan Name",
+    value: form.name,
+    onChange: v => setForm({
+      ...form,
+      name: v
+    }),
+    placeholder: "e.g. Home Loan"
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Lender",
+    value: form.lender,
+    onChange: v => setForm({
+      ...form,
+      lender: v
+    }),
+    placeholder: "e.g. HDFC Bank"
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Principal (â‚¹)",
+    type: "number",
+    value: form.principal,
+    onChange: v => setForm({
+      ...form,
+      principal: v
+    }),
+    prefix: "â‚¹"
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Annual Rate %",
+    type: "number",
+    value: form.rate,
+    onChange: v => setForm({
+      ...form,
+      rate: v
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Tenure (months)",
+    type: "number",
+    value: form.tenureMonths,
+    onChange: v => setForm({
+      ...form,
+      tenureMonths: v
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Start Date",
+    type: "date",
+    value: form.startDate,
+    onChange: v => setForm({
+      ...form,
+      startDate: v
+    })
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "EMI Due Day",
+    type: "number",
+    value: form.dueDay,
+    onChange: v => setForm({
+      ...form,
+      dueDay: v
+    })
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: addLoan,
+    className: "w-full",
+    style: {
+      background: COLOR.banyan,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontWeight: 700,
+      fontSize: 14,
+      padding: "12px 0",
+      borderRadius: 10,
+      border: "none"
+    }
+  }, "Add Loan")), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      background: COLOR.ink,
+      border: "none"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 10,
+      color: "#B9C0CE",
+      textTransform: "uppercase"
+    }
+  }, "Total monthly EMI"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 24,
+      color: COLOR.white,
+      fontWeight: 600
+    }
+  }, formatINR(totalEMI))), loans.map(l => {
+    const emi = calcEMI(l.principal, l.rate, l.tenureMonths);
+    const paid = paidSoFar(l.name);
+    const outstanding = Math.max(l.principal - paid, 0);
+    const status = outstanding <= 0 ? "Closed" : "Active";
+    const totalPayable = emi * l.tenureMonths;
+    const totalInterest = totalPayable - l.principal;
+    return /*#__PURE__*/React.createElement(Card, {
+      key: l.id
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex justify-between items-start"
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_DISPLAY,
+        fontSize: 17,
+        fontWeight: 600,
+        color: COLOR.ink
+      }
+    }, l.name), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 12,
+        color: COLOR.mutedInk
+      }
+    }, l.lender)), /*#__PURE__*/React.createElement(Pill, {
+      color: status === "Active" ? "#8A6D1E" : COLOR.banyan,
+      bg: status === "Active" ? "#F4E7C4" : "#DCEBE1"
+    }, status)), /*#__PURE__*/React.createElement("div", {
+      className: "grid grid-cols-2 gap-y-2",
+      style: {
+        marginTop: 12
+      }
+    }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 10,
+        color: COLOR.mutedInk,
+        textTransform: "uppercase"
+      }
+    }, "EMI"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 14,
+        fontWeight: 700,
+        color: COLOR.ink
+      }
+    }, formatINRShort(emi))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 10,
+        color: COLOR.mutedInk,
+        textTransform: "uppercase"
+      }
+    }, "Outstanding"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 14,
+        fontWeight: 700,
+        color: COLOR.brick
+      }
+    }, formatINRShort(outstanding))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 10,
+        color: COLOR.mutedInk,
+        textTransform: "uppercase"
+      }
+    }, "Paid so far"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 14,
+        fontWeight: 700,
+        color: COLOR.banyan
+      }
+    }, formatINRShort(paid))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 10,
+        color: COLOR.mutedInk,
+        textTransform: "uppercase"
+      }
+    }, "Total interest"), /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 14,
+        fontWeight: 700,
+        color: COLOR.ink
+      }
+    }, formatINRShort(totalInterest)))));
+  }));
+}
+
+/* ============================================================
+   MORE / SETTINGS
+   ============================================================ */
+function More({
+  settings,
+  setSettings,
+  goToTab,
+  user,
+  userRole
+}) {
+  const [bank1, setBank1] = useState(settings.bank1Name);
+  const [bank2, setBank2] = useState(settings.bank2Name);
+  const [signingOut, setSigningOut] = useState(false);
+  function saveBanks() {
+    setSettings({
+      ...settings,
+      bank1Name: bank1,
+      bank2Name: bank2
+    });
+  }
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await signOutUser();
+    } finally {
+      setSigningOut(false);
+    }
+  }
+  return /*#__PURE__*/React.createElement(Screen, {
+    title: "More",
+    subtitle: "Settings and install"
+  }, /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 11,
+      color: COLOR.mutedInk,
+      textTransform: "uppercase",
+      letterSpacing: "0.05em"
+    }
+  }, "Signed in as"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 14,
+      fontWeight: 700,
+      color: COLOR.ink,
+      marginTop: 2
+    }
+  }, user?.email || "Google Account"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: userRole === 'owner' ? COLOR.banyan : COLOR.brick,
+      marginTop: 4
+    }
+  }, userRole === 'owner' ? 'ðŸ‘‘ Owner - Full Access' : 'ðŸ‘¤ Family Member - Loans Only')), /*#__PURE__*/React.createElement("button", {
+    onClick: handleSignOut,
+    disabled: signingOut,
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      fontWeight: 700,
+      color: COLOR.brick,
+      background: "#FCE4E4",
+      padding: "8px 14px",
+      borderRadius: 999,
+      border: "none"
+    }
+  }, signingOut ? "â€¦" : "Sign Out"))), userRole === 'owner' && /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: 0
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("budget"),
+    className: "w-full flex items-center justify-between",
+    style: {
+      padding: "14px 16px",
+      borderBottom: `1px solid ${COLOR.rule}`
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement(PiggyBank, {
+    size: 18,
+    color: COLOR.marigold
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 14,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, "Budget")), /*#__PURE__*/React.createElement(ChevronRight, {
+    size: 16,
+    color: COLOR.mutedInk
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("loans"),
+    className: "w-full flex items-center justify-between",
+    style: {
+      padding: "14px 16px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement(Landmark, {
+    size: 18,
+    color: COLOR.brick
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 14,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, "Loans")), /*#__PURE__*/React.createElement(ChevronRight, {
+    size: 16,
+    color: COLOR.mutedInk
+  }))), /*#__PURE__*/React.createElement(Card, {
+    style: {
+      padding: 0
+    }
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => goToTab("loans"),
+    className: "w-full flex items-center justify-between",
+    style: {
+      padding: "14px 16px"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement(Landmark, {
+    size: 18,
+    color: COLOR.brick
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 14,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, "Loans")), /*#__PURE__*/React.createElement(ChevronRight, {
+    size: 16,
+    color: COLOR.mutedInk
+  }))), userRole === 'owner' && /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "Bank accounts"), /*#__PURE__*/React.createElement(TextField, {
+    label: "Bank Account 1",
+    value: bank1,
+    onChange: setBank1
+  }), /*#__PURE__*/React.createElement(TextField, {
+    label: "Bank Account 2",
+    value: bank2,
+    onChange: setBank2
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: saveBanks,
+    style: {
+      background: COLOR.ink,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontWeight: 700,
+      fontSize: 13,
+      padding: "10px 16px",
+      borderRadius: 10,
+      border: "none"
+    }
+  }, "Save")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "Your data"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.inkSoft,
+      lineHeight: 1.6
+    }
+  }, "All entries are stored in your own Google Sheet. Open it in Google Sheets anytime to view, edit, export, or share the raw data. The app syncs every 30 seconds so any changes you make directly in the Sheet will appear here shortly.")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "Install on your phone"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.inkSoft,
+      lineHeight: 1.6
+    }
+  }, /*#__PURE__*/React.createElement("b", null, "iPhone (Safari):"), " tap the Share icon, then \"Add to Home Screen.\"", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("b", null, "Android (Chrome):"), " tap â‹® menu, then \"Add to Home screen.\"", /*#__PURE__*/React.createElement("br", null), /*#__PURE__*/React.createElement("br", null), "Opens full-screen with no browser bar, like a real app.")));
+}
+
+/* ============================================================
+   BOTTOM NAV
+   ============================================================ */
+function BottomNav({
+  active,
+  onChange,
+  userRole
+}) {
+  const allItems = [{
+    key: "dashboard",
+    icon: Home,
+    label: "Home"
+  }, {
+    key: "add",
+    icon: Plus,
+    label: "Add"
+  }, {
+    key: "farm",
+    icon: Sprout,
+    label: "Farm"
+  }, {
+    key: "transactions",
+    icon: ListIcon,
+    label: "Log"
+  }, {
+    key: "cards",
+    icon: CreditCard,
+    label: "Cards"
+  }, {
+    key: "more",
+    icon: Menu,
+    label: "More"
+  }];
+
+  // Family members see Home, Farm and More
+  // Owner sees all tabs
+  const items = userRole === 'family'
+    ? allItems.filter(item => item.key === 'dashboard' || item.key === 'farm' || item.key === 'more')
+    : allItems;
+
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      bottom: 0,
+      left: 0,
+      right: 0,
+      background: COLOR.white,
+      borderTop: `1px solid ${COLOR.rule}`,
+      display: "flex",
+      padding: "8px 4px calc(8px + env(safe-area-inset-bottom))"
+    }
+  }, items.map(item => {
+    const Icon = item.icon;
+    const isActive = active === item.key;
+    return /*#__PURE__*/React.createElement("button", {
+      key: item.key,
+      onClick: () => onChange(item.key),
+      className: "flex-1 flex flex-col items-center gap-1",
+      style: {
+        padding: "4px 0",
+        color: isActive ? COLOR.brick : COLOR.mutedInk
+      }
+    }, /*#__PURE__*/React.createElement(Icon, {
+      size: 20,
+      strokeWidth: isActive ? 2.4 : 2
+    }), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 10,
+        fontWeight: isActive ? 700 : 500
+      }
+    }, item.label));
+  }));
+}
+
+/* ============================================================
+   AUTH SCREEN â€” Google Sign-In
+   ============================================================ */
+function AuthScreen({
+  onSignIn
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function handleSignIn() {
+    setBusy(true);
+    setError("");
+    try {
+      await signIn();
+    } catch (e) {
+      setError("Sign-in failed. Make sure pop-ups are allowed for this page.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      display: "flex",
+      flexDirection: "column",
+      justifyContent: "center",
+      padding: "24px 24px 80px",
+      background: COLOR.paper
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      marginBottom: 32
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 52,
+      marginBottom: 8
+    }
+  }, "â‚¹"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_DISPLAY,
+      fontSize: 32,
+      fontWeight: 600,
+      color: COLOR.ink
+    }
+  }, "Ledger"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 13,
+      color: COLOR.mutedInk,
+      marginTop: 6,
+      lineHeight: 1.5
+    }
+  }, "Your household's shared expense manager.", /*#__PURE__*/React.createElement("br", null), "Data saved to your own Google Sheet.")), /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement("button", {
+    onClick: handleSignIn,
+    disabled: busy,
+    className: "w-full flex items-center justify-center gap-3",
+    style: {
+      background: COLOR.white,
+      color: COLOR.ink,
+      fontFamily: FONT_BODY,
+      fontWeight: 700,
+      fontSize: 15,
+      padding: "13px 0",
+      borderRadius: 12,
+      border: `1.5px solid ${COLOR.rule}`,
+      cursor: "pointer",
+      opacity: busy ? 0.6 : 1,
+      boxShadow: "0 1px 4px rgba(0,0,0,0.08)"
+    }
+  }, /*#__PURE__*/React.createElement("svg", {
+    width: "20",
+    height: "20",
+    viewBox: "0 0 48 48"
+  }, /*#__PURE__*/React.createElement("path", {
+    fill: "#4285F4",
+    d: "M45.5 24.5c0-1.5-.1-3-.4-4.4H24v8.3h12.1c-.5 2.7-2.1 5-4.4 6.5v5.4h7.1c4.2-3.8 6.7-9.5 6.7-15.8z"
+  }), /*#__PURE__*/React.createElement("path", {
+    fill: "#34A853",
+    d: "M24 46c6.1 0 11.2-2 14.9-5.5l-7.1-5.4c-2 1.3-4.5 2.1-7.8 2.1-6 0-11-4-12.8-9.5H3.8v5.6C7.5 41.8 15.2 46 24 46z"
+  }), /*#__PURE__*/React.createElement("path", {
+    fill: "#FBBC05",
+    d: "M11.2 27.7A13.6 13.6 0 0 1 10.5 24c0-1.3.2-2.5.7-3.7v-5.6H3.8A22 22 0 0 0 2 24c0 3.6.9 7 2.4 10l6.8-6.3z"
+  }), /*#__PURE__*/React.createElement("path", {
+    fill: "#EA4335",
+    d: "M24 10.8c3.4 0 6.4 1.2 8.8 3.5l6.5-6.5C35.2 4 29.6 2 24 2 15.2 2 7.5 6.2 3.8 12.8l7.4 5.5C13 13 18.1 10.8 24 10.8z"
+  })), busy ? "Opening Google sign-inâ€¦" : "Sign in with Google"), error && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.brick,
+      background: "#FCE4E4",
+      borderRadius: 8,
+      padding: "8px 10px",
+      marginTop: 12
+    }
+  }, error)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      color: COLOR.mutedInk,
+      textAlign: "center",
+      marginTop: 12,
+      lineHeight: 1.6
+    }
+  }, "The first time you sign in, the app will ask permission to access Google Sheets. Your data is stored only in your own Sheet â€” Ledger cannot see anyone else's data."));
+}
+
+/* ============================================================
+   ROOT APP
+   ============================================================ */
+function App() {
+  const [authLoading, setAuthLoading] = useState(true);
+  const [user, setUser] = useState(null);
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [tab, setTab] = useState("dashboard");
+  const [transactions, setTransactions] = useState([]);
+  const [loans, setLoans] = useState(DEFAULT_LOANS);
+  const [settings, setSettingsState] = useState(DEFAULT_SETTINGS);
+  const [budgets, setBudgetsState] = useState(DEFAULT_BUDGETS);
+
+  // Restore any valid session token before GIS loads (avoids forced re-auth
+  // on every page refresh while the token is still alive).
+  useEffect(() => {
+    tryRestoreToken();
+  }, []);
+
+  // Watch auth state (immediately fires with null, then with token once signed in)
+  useEffect(() => {
+    const unsub = onAuthChange(u => {
+      setUser(u);
+      setAuthLoading(false);
+      if (!u) {
+        setDataLoaded(false);
+        setTransactions([]);
+      }
+    });
+    return () => unsub?.();
+  }, []);
+
+  // Once signed in: seed if needed, then load all data once, and poll every
+  // 30 s so family members' changes appear fairly quickly without WebSockets.
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    async function loadAll() {
+      setSyncing(true);
+      setSyncError("");
+      try {
+        await ensureSheets();
+        await ensureSeeded();
+        const [tx, ln, st, bg] = await Promise.all([fetchTransactions(), fetchLoans(), fetchSettings(), fetchBudgets()]);
+        if (!cancelled) {
+          setTransactions(tx);
+          setLoans(ln.length ? ln : DEFAULT_LOANS);
+          setSettingsState(st);
+          setBudgetsState(bg);
+          setDataLoaded(true);
+        }
+      } catch (e) {
+        if (!cancelled) setSyncError("Couldn't reach your Sheet. Check your internet connection.");
+      } finally {
+        if (!cancelled) setSyncing(false);
+      }
+    }
+    loadAll();
+    const interval = setInterval(loadAll, 30000); // poll every 30 s
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [user]);
+  const addTransaction = useCallback(t => {
+    // Optimistic update first so UI feels instant, then write to Sheet.
+    setTransactions(prev => [t, ...prev]);
+    addTransactionRemote({
+      ...t,
+      addedBy: currentUserLabel()
+    }).catch(() => {
+      setSyncError("Couldn't save to Sheet. Check your connection and try again.");
+    });
+  }, []);
+  const deleteTransaction = useCallback(id => {
+    setTransactions(prev => {
+      const next = prev.filter(t => t.id !== id);
+      deleteTransactionRemote(id, prev).catch(() => {
+        setSyncError("Couldn't delete from Sheet.");
+      });
+      return next;
+    });
+  }, []);
+  const updateLoans = useCallback(next => {
+    setLoans(next);
+    setLoansRemote(next).catch(() => setSyncError("Couldn't save loans to Sheet."));
+  }, []);
+  const updateSettings = useCallback(next => {
+    setSettingsState(next);
+    setSettingsRemote(next).catch(() => setSyncError("Couldn't save settings to Sheet."));
+  }, []);
+  const updateBudgets = useCallback(next => {
+    setBudgetsState(next);
+    setBudgetsRemote(next).catch(() => setSyncError("Couldn't save budget to Sheet."));
+  }, []);
+
+  // Calculate user role
+  const userRole = user ? getUserRole() : 'family';
+
+  const globalStyle = /*#__PURE__*/React.createElement("style", null, `
+      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700;800&display=swap');
+      * { box-sizing: border-box; }
+      input, select { font-family: inherit; }
+      input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.3); }
+    `);
+  if (authLoading) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-center h-full",
+      style: {
+        background: COLOR.paper
+      }
+    }, globalStyle, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_DISPLAY,
+        color: COLOR.ink,
+        fontSize: 18
+      }
+    }, "Opening your ledgerâ€¦"));
+  }
+  if (!user) {
+    return /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        background: COLOR.paper,
+        height: "100vh",
+        maxWidth: 420,
+        margin: "0 auto"
+      }
+    }, globalStyle, /*#__PURE__*/React.createElement(AuthScreen, null));
+  }
+  if (!dataLoaded) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-center h-full",
+      style: {
+        background: COLOR.paper
+      }
+    }, globalStyle, /*#__PURE__*/React.createElement("div", {
+      style: {
+        textAlign: "center"
+      }
+    }, /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_DISPLAY,
+        color: COLOR.ink,
+        fontSize: 18
+      }
+    }, "Loading your Sheetâ€¦"), syncError && /*#__PURE__*/React.createElement("div", {
+      style: {
+        fontFamily: FONT_BODY,
+        fontSize: 13,
+        color: COLOR.brick,
+        marginTop: 8
+      }
+    }, syncError)));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontFamily: FONT_BODY,
+      background: COLOR.paper,
+      height: "100vh",
+      maxWidth: 420,
+      margin: "0 auto",
+      position: "relative",
+      overflow: "hidden"
+    }
+  }, globalStyle, syncing && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      background: `linear-gradient(90deg, ${COLOR.banyan}, ${COLOR.marigold})`,
+      zIndex: 999,
+      animation: "none"
+    }
+  }), syncError && /*#__PURE__*/React.createElement("div", {
+    onClick: () => setSyncError(""),
+    style: {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      right: 0,
+      background: COLOR.brick,
+      color: COLOR.white,
+      fontFamily: FONT_BODY,
+      fontSize: 12,
+      padding: "6px 16px",
+      zIndex: 998,
+      cursor: "pointer",
+      textAlign: "center"
+    }
+  }, syncError, " (tap to dismiss)"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      display: "flex",
+      flexDirection: "column"
+    }
+  }, tab === "dashboard" && /*#__PURE__*/React.createElement(Dashboard, {
+    transactions: transactions,
+    loans: loans,
+    settings: settings,
+    budgets: budgets,
+    goToTab: setTab,
+    userRole: userRole
+  }), tab === "add" && /*#__PURE__*/React.createElement(AddEntry, {
+    settings: settings,
+    loans: loans,
+    onAdd: addTransaction,
+    goToTab: setTab
+  }), tab === "farm" && /*#__PURE__*/React.createElement(FarmEntry, {
+    settings: settings,
+    onAdd: addTransaction
+  }), tab === "transactions" && /*#__PURE__*/React.createElement(Transactions, {
+    transactions: transactions,
+    onDelete: deleteTransaction
+  }), tab === "cards" && /*#__PURE__*/React.createElement(CardsScreen, {
+    transactions: transactions,
+    settings: settings
+  }), tab === "budget" && /*#__PURE__*/React.createElement(Budget, {
+    transactions: transactions,
+    budgets: budgets,
+    setBudgets: updateBudgets
+  }), tab === "loans" && /*#__PURE__*/React.createElement(Loans, {
+    loans: loans,
+    setLoans: updateLoans,
+    transactions: transactions
+  }), tab === "more" && /*#__PURE__*/React.createElement(More, {
+    settings: settings,
+    setSettings: updateSettings,
+    goToTab: setTab,
+    user: user,
+    userRole: userRole
+  })), /*#__PURE__*/React.createElement(BottomNav, {
+    active: tab,
+    onChange: setTab,
+    userRole: userRole
+  }));
+}
+
+const __root = ReactDOM.createRoot(document.getElementById("root"));
+__root.render(React.createElement(App));
+
+</script>
+
+<script>
+  setTimeout(function () { window.__hideSplash(); }, 80);
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
