@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --navy: #1F3864;
+      --green: #2F5233;
+      --yellow-bg: #FFFDE7;
+      --border: #cccccc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 16px;
+      color: #222;
+    }
+    .card {
+      max-width: 480px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+      padding: 20px 20px 28px;
+    }
+    h1 {
+      font-size: 20px;
+      color: var(--navy);
+      margin: 0 0 4px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 18px;
+      line-height: 1.4;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: bold;
+      color: #444;
+      margin: 14px 0 4px;
+    }
+    select, input, textarea {
+      width: 100%;
+      padding: 10px;
+      font-size: 15px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--yellow-bg);
+    }
+    textarea { resize: vertical; min-height: 50px; }
+    .hint {
+      font-size: 11px;
+      color: #2E75B6;
+      font-style: italic;
+      margin-top: 3px;
+    }
+    .section-tag {
+      display: inline-block;
+      font-size: 10px;
+      color: #fff;
+      background: #999;
+      border-radius: 4px;
+      padding: 2px 6px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .animal-register-only { display: none; }
+    #submitBtn {
+      width: 100%;
+      margin-top: 22px;
+      padding: 14px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #fff;
+      background: var(--green);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    #submitBtn:disabled { background: #999; }
+    #statusMsg {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      display: none;
+    }
+    #statusMsg.success { display: block; background: #e2efda; color: #1e4620; }
+    #statusMsg.error { display: block; background: #fce4e4; color: #8a1f1f; }
+    .spinner {
+      display: none;
+      text-align: center;
+      font-size: 13px;
+      color: #666;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>⚡ Farm Quick Entry</h1>
+    <div class="subtitle">Fill in the fields below and tap Submit. Everything saves straight to the family Google Sheet.</div>
+
+    <form id="entryForm">
+      <label>Entry Type</label>
+      <select id="entryType" required>
+        <option value="">Select...</option>
+        <option value="Income">Income</option>
+        <option value="Expense">Expense</option>
+        <option value="Production Log">Production Log</option>
+        <option value="Animal Register">Animal Register (add a new animal)</option>
+      </select>
+
+      <label>Date</label>
+      <input type="date" id="date" required>
+
+      <label>Animal / Farm Type</label>
+      <select id="animalType" required>
+        <option value="">Select...</option>
+      </select>
+
+      <label>Batch <span style="font-weight:normal;color:#888;">(optional)</span></label>
+      <select id="batch">
+        <option value="">— whole farm / no batch —</option>
+      </select>
+      <div class="hint">Pick a batch to narrow the Animal ID list below to just its active animals.</div>
+
+      <label id="animalIdLabel">Animal ID(s) <span style="font-weight:normal;color:#888;">(optional)</span></label>
+      <select id="animalId">
+        <option value="">— none / whole batch —</option>
+      </select>
+      <div class="hint" id="animalIdHint">Leave blank to cover the whole batch. For Animal Register, this becomes the new animal's ID — type it directly below instead.</div>
+      <input type="text" id="animalIdText" placeholder="New Animal ID (e.g. GOAT-31)" style="display:none; margin-top:6px;">
+
+      <label id="categoryLabel">Category / Product</label>
+      <select id="category">
+        <option value="">Select...</option>
+      </select>
+
+      <label>Description</label>
+      <input type="text" id="description" placeholder="Optional">
+
+      <label id="amountLabel">Amount (₹) / Quantity / Acquisition Cost</label>
+      <input type="number" id="amount" step="0.01" required>
+
+      <label id="paymentLabel">Payment Mode</label>
+      <select id="paymentMode">
+        <option value="">Select...</option>
+      </select>
+
+      <label>Notes</label>
+      <textarea id="notes" placeholder="Optional"></textarea>
+
+      <div class="animal-register-only">
+        <label>Breed <span class="section-tag">ANIMAL REGISTER</span></label>
+        <input type="text" id="breed" placeholder="e.g. Boer, Sirohi, Jersey">
+
+        <label>Gender <span class="section-tag">ANIMAL REGISTER</span></label>
+        <select id="gender"><option value="">Select...</option></select>
+
+        <label>Purpose <span class="section-tag">ANIMAL REGISTER</span></label>
+        <select id="purpose"><option value="">Select...</option></select>
+
+        <label>Age at Acquisition (Yrs) <span class="section-tag">ANIMAL REGISTER</span></label>
+        <input type="number" id="ageAtAcquisition" step="0.1">
+
+        <label>Useful Life (Yrs) <span class="section-tag">ANIMAL REGISTER</span></label>
+        <input type="number" id="usefulLife" step="1">
+
+        <label>Salvage Value (₹) <span class="section-tag">ANIMAL REGISTER</span></label>
+        <input type="number" id="salvageValue" step="0.01">
+      </div>
+
+      <button type="submit" id="submitBtn">✅ Submit Entry</button>
+      <div class="spinner" id="spinner">Saving...</div>
+      <div id="statusMsg"></div>
+    </form>
+  </div>
+
+  <script>
+    let formData = { animalTypes: [], expenseCats: [], incomeCats: [], paymentModes: [],
+                      productTypes: [], genders: [], purposes: [], batches: [] };
+
+    function fillSelect(select, options, placeholder) {
+      select.innerHTML = '<option value="">' + placeholder + '</option>';
+      options.forEach(opt => {
+        const o = document.createElement('option');
+        o.value = opt; o.textContent = opt;
+        select.appendChild(o);
+      });
+    }
+
+    google.script.run.withSuccessHandler(function(data) {
+      formData = data;
+      fillSelect(document.getElementById('animalType'), data.animalTypes, 'Select...');
+      fillSelect(document.getElementById('paymentMode'), data.paymentModes, 'Select...');
+      fillSelect(document.getElementById('gender'), data.genders, 'Select...');
+      fillSelect(document.getElementById('purpose'), data.purposes, 'Select...');
+      const batchSel = document.getElementById('batch');
+      batchSel.innerHTML = '<option value="">— whole farm / no batch —</option>';
+      data.batches.forEach(b => {
+        const o = document.createElement('option');
+        o.value = b; o.textContent = b;
+        batchSel.appendChild(o);
+      });
+    }).getFormData();
+
+    function updateCategoryOptions() {
+      const type = document.getElementById('entryType').value;
+      const catSel = document.getElementById('category');
+      if (type === 'Income') fillSelect(catSel, formData.incomeCats, 'Select...');
+      else if (type === 'Expense') fillSelect(catSel, formData.expenseCats, 'Select...');
+      else if (type === 'Production Log') fillSelect(catSel, formData.productTypes, 'Select...');
+      else fillSelect(catSel, [], 'Select...');
+    }
+
+    function refreshAnimalIdList() {
+      const type = document.getElementById('animalType').value;
+      const batch = document.getElementById('batch').value;
+      const sel = document.getElementById('animalId');
+      if (!type) { sel.innerHTML = '<option value="">— none / whole batch —</option>'; return; }
+      google.script.run.withSuccessHandler(function(ids) {
+        sel.innerHTML = '<option value="">— none / whole batch —</option>';
+        ids.forEach(id => {
+          const o = document.createElement('option');
+          o.value = id; o.textContent = id;
+          sel.appendChild(o);
+        });
+      }).getFilteredAnimals(type, batch);
+    }
+
+    function toggleAnimalRegisterMode() {
+      const isRegister = document.getElementById('entryType').value === 'Animal Register';
+      document.querySelectorAll('.animal-register-only').forEach(el => {
+        el.style.display = isRegister ? 'block' : 'none';
+      });
+      document.getElementById('categoryLabel').parentElement && null;
+      document.getElementById('category').closest('label') && null;
+
+      // hide/show fields not relevant to Animal Register
+      document.getElementById('categoryLabel').style.display = isRegister ? 'none' : 'block';
+      document.getElementById('category').style.display = isRegister ? 'none' : 'block';
+      document.getElementById('paymentLabel').style.display = isRegister ? 'none' : 'block';
+      document.getElementById('paymentMode').style.display = isRegister ? 'none' : 'block';
+      document.getElementById('amountLabel').textContent = isRegister
+        ? 'Acquisition Cost (₹)' : 'Amount (₹) / Quantity';
+
+      document.getElementById('animalId').style.display = isRegister ? 'none' : 'block';
+      document.getElementById('animalIdText').style.display = isRegister ? 'block' : 'none';
+      document.getElementById('animalIdLabel').textContent = isRegister
+        ? 'New Animal ID (required)' : 'Animal ID(s) (optional)';
+      document.getElementById('animalIdHint').style.display = isRegister ? 'none' : 'block';
+    }
+
+    document.getElementById('entryType').addEventListener('change', function() {
+      updateCategoryOptions();
+      toggleAnimalRegisterMode();
+    });
+    document.getElementById('animalType').addEventListener('change', refreshAnimalIdList);
+    document.getElementById('batch').addEventListener('change', refreshAnimalIdList);
+
+    document.getElementById('entryForm').addEventListener('submit', function(e) {
+      e.preventDefault();
+      const isRegister = document.getElementById('entryType').value === 'Animal Register';
+
+      const payload = {
+        entryType: document.getElementById('entryType').value,
+        date: document.getElementById('date').value,
+        animalType: document.getElementById('animalType').value,
+        batch: document.getElementById('batch').value,
+        animalId: isRegister
+          ? document.getElementById('animalIdText').value
+          : document.getElementById('animalId').value,
+        category: document.getElementById('category').value,
+        description: document.getElementById('description').value,
+        amount: document.getElementById('amount').value,
+        paymentMode: document.getElementById('paymentMode').value,
+        notes: document.getElementById('notes').value,
+        breed: document.getElementById('breed').value,
+        gender: document.getElementById('gender').value,
+        purpose: document.getElementById('purpose').value,
+        ageAtAcquisition: document.getElementById('ageAtAcquisition').value,
+        usefulLife: document.getElementById('usefulLife').value,
+        salvageValue: document.getElementById('salvageValue').value
+      };
+
+      const btn = document.getElementById('submitBtn');
+      const spinner = document.getElementById('spinner');
+      const statusMsg = document.getElementById('statusMsg');
+      btn.disabled = true;
+      spinner.style.display = 'block';
+      statusMsg.style.display = 'none';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          spinner.style.display = 'none';
+          btn.disabled = false;
+          statusMsg.className = result.success ? 'success' : 'error';
+          statusMsg.textContent = result.message;
+          statusMsg.style.display = 'block';
+          if (result.success) {
+            document.getElementById('entryForm').reset();
+            toggleAnimalRegisterMode();
+          }
+        })
+        .withFailureHandler(function(err) {
+          spinner.style.display = 'none';
+          btn.disabled = false;
+          statusMsg.className = 'error';
+          statusMsg.textContent = 'Error: ' + err.message;
+          statusMsg.style.display = 'block';
+        })
+        .submitEntry(payload);
+    });
+
+    toggleAnimalRegisterMode();
+  </script>
+</body>
+</html>
