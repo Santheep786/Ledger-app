@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -724,6 +724,16 @@ const GOOG_CLIENT_ID = "268317691803-ucr4tm8s5mb6im0b4kt9mna4qd9k0i5t.apps.googl
 const SPREADSHEET_ID = "12Y1fQFGMaFOkc6HhlX5zjw-HtcmzI_nF3kRp_2yuVWU";
 const SCOPES = "https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 
+// NOTE: Google OAuth requires the running origin to be configured in the Google Cloud Console.
+// Add your dev URL (for example http://localhost:8000) under "Authorized JavaScript origins".
+const GOOGLE_ALLOWED_ORIGINS = [
+  "http://localhost",
+  "http://localhost:8000",
+  "http://127.0.0.1",
+  "http://127.0.0.1:8000",
+  "https://santheep786.github.io"
+];
+
 // TODO: Add your email address as the owner
 const OWNER_EMAIL = "santheeps987@gmail.com"; // Replace with your actual email
 
@@ -732,6 +742,14 @@ let _tokenClient = null;
 let _accessToken = null;
 let _userEmail = null;
 let _authListeners = [];
+function reportGoogleOriginIssue() {
+  const currentOrigin = window.location.origin || "";
+  const issue = currentOrigin && currentOrigin !== "null" && !currentOrigin.startsWith("file:")
+    ? `Google OAuth rejected the current origin: ${currentOrigin}. Add it in Google Cloud Console > APIs & Services > Credentials > OAuth 2.0 Client IDs > Authorized JavaScript origins.`
+    : "Google sign-in requires a web origin such as http://localhost:8000. Run the app from a local web server or add your deployed site to the OAuth client origins in Google Cloud Console.";
+  console.warn(issue);
+  alert(issue);
+}
 function notifyAuth() {
   _authListeners.forEach(cb => cb(_accessToken ? {
     token: _accessToken,
@@ -803,6 +821,16 @@ function tryRestoreToken() {
   } catch (e) {}
 }
 async function signIn() {
+  const currentOrigin = window.location.origin || "";
+  const allowed = currentOrigin && currentOrigin !== "null" && !currentOrigin.startsWith("file:")
+    ? GOOGLE_ALLOWED_ORIGINS.includes(currentOrigin)
+    : false;
+
+  if (!allowed) {
+    reportGoogleOriginIssue();
+    return;
+  }
+
   await ensureTokenClient();
   // If we already have a valid token, just notify.
   if (_accessToken) {
@@ -1130,6 +1158,42 @@ function SectionLabel({
     }
   }, children);
 }
+function ReportDashboard({
+  transactions,
+  settings
+}) {
+  const [period, setPeriod] = useState("monthly");
+  const [selectedMonth, setSelectedMonth] = useState(monthKey(todayISO()));
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const years = Array.from(new Set(transactions.map(t => String(t.date).slice(0, 4)).filter(Boolean))).sort().reverse();
+  const months = Array.from(new Set(transactions.map(t => monthKey(t.date)).filter(Boolean))).sort().reverse();
+  const yearOptions = years.length ? years : [String(new Date().getFullYear())];
+  const monthOptions = months.length ? months : [monthKey(todayISO())];
+  const selectedKey = period === "monthly" ? selectedMonth : String(selectedYear);
+  const rows = transactions.filter(t => period === "monthly" ? monthKey(t.date) === selectedKey : String(t.date).slice(0, 4) === selectedKey);
+  const sum = type => rows.filter(t => t.type === type).reduce((total, t) => total + Number(t.amount || 0), 0);
+  const income = sum("Income");
+  const expense = sum("Expense");
+  const investment = sum("Investment");
+  const loanPayment = sum("Loan Payment");
+  const transfer = sum("Transfer");
+  const net = income - expense - investment - loanPayment;
+  const categories = {};
+  rows.forEach(t => { const key = t.category || t.type || "Other"; categories[key] = (categories[key] || 0) + Number(t.amount || 0); });
+  const topCategories = Object.entries(categories).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const trendKeys = period === "monthly" ? fyMonths(settings.fyStartYear) : yearOptions;
+  const trendData = trendKeys.map(key => {
+    const entries = transactions.filter(t => period === "monthly" ? monthKey(t.date) === key : String(t.date).slice(0, 4) === key);
+    return { month: period === "monthly" ? fyMonthLabel(key + "-01") : key, Income: Math.round(entries.filter(t => t.type === "Income").reduce((s, t) => s + Number(t.amount || 0), 0)), Expense: Math.round(entries.filter(t => t.type === "Expense").reduce((s, t) => s + Number(t.amount || 0), 0)) };
+  });
+  const periodLabel = period === "monthly" ? new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" }) : String(selectedYear);
+  const renderTotal = (name, value, color) => /*#__PURE__*/React.createElement("div", { key: name, style: { background: COLOR.paper, borderRadius: 9, padding: "10px 11px" } }, /*#__PURE__*/React.createElement("div", { style: { fontFamily: FONT_BODY, fontSize: 10, color: COLOR.mutedInk, textTransform: "uppercase" } }, name), /*#__PURE__*/React.createElement("div", { style: { fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color, marginTop: 3 } }, formatINRShort(value)));
+  return /*#__PURE__*/React.createElement(React.Fragment, null,
+    /*#__PURE__*/React.createElement(Card, { style: { padding: 14 } }, /*#__PURE__*/React.createElement(SectionLabel, null, "Reports"), /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 5, marginBottom: 12 } }, ["monthly", "yearly"].map(value => /*#__PURE__*/React.createElement("button", { key: value, onClick: () => setPeriod(value), style: { flex: 1, border: `1px solid ${period === value ? COLOR.ink : COLOR.rule}`, borderRadius: 8, padding: "8px 5px", fontFamily: FONT_BODY, fontSize: 12, fontWeight: 700, color: period === value ? COLOR.white : COLOR.mutedInk, background: period === value ? COLOR.ink : COLOR.paper, cursor: "pointer" } }, value === "monthly" ? "Monthly" : "Yearly"))), /*#__PURE__*/React.createElement("select", { value: period === "monthly" ? selectedMonth : selectedYear, onChange: e => period === "monthly" ? setSelectedMonth(e.target.value) : setSelectedYear(Number(e.target.value)), style: { width: "100%", fontFamily: FONT_BODY, fontSize: 13, color: COLOR.ink, background: COLOR.paper, border: `1px solid ${COLOR.rule}`, borderRadius: 8, padding: "8px 10px", marginBottom: 12 } }, (period === "monthly" ? monthOptions : yearOptions).map(value => /*#__PURE__*/React.createElement("option", { key: value, value: value }, period === "monthly" ? new Date(`${value}-01T00:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" }) : value))), /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 } }, [["Income", income, COLOR.banyan], ["Expenses", expense, COLOR.brick], ["Investments", investment, COLOR.marigold], ["Loan payments", loanPayment, COLOR.ink]].map(([name, value, color]) => renderTotal(name, value, color))), /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 12, paddingTop: 10, borderTop: `1px solid ${COLOR.rule}`, fontFamily: FONT_BODY, fontSize: 12 } }, /*#__PURE__*/React.createElement("span", { style: { color: COLOR.mutedInk } }, periodLabel, " net position"), /*#__PURE__*/React.createElement("strong", { style: { color: net >= 0 ? COLOR.banyan : COLOR.brick } }, formatINR(net))), transfer > 0 && /*#__PURE__*/React.createElement("div", { style: { marginTop: 6, fontFamily: FONT_BODY, fontSize: 11, color: COLOR.mutedInk } }, "Transfers tracked: ", formatINRShort(transfer))),
+    /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, period === "monthly" ? "Monthly trend in this financial year" : "Yearly trend"), /*#__PURE__*/React.createElement(MiniBarChart, { data: trendData, height: 145 })),
+    /*#__PURE__*/React.createElement(Card, null, /*#__PURE__*/React.createElement(SectionLabel, null, "All categories"), topCategories.length === 0 && /*#__PURE__*/React.createElement("div", { style: { fontFamily: FONT_BODY, fontSize: 13, color: COLOR.mutedInk } }, "No entries for this period."), topCategories.map(([category, amount]) => /*#__PURE__*/React.createElement("div", { key: category, style: { marginBottom: 10 } }, /*#__PURE__*/React.createElement("div", { className: "flex justify-between", style: { marginBottom: 3 } }, /*#__PURE__*/React.createElement("span", { style: { fontFamily: FONT_BODY, fontSize: 13, color: COLOR.ink } }, category), /*#__PURE__*/React.createElement("span", { style: { fontFamily: FONT_BODY, fontSize: 13, fontWeight: 600, color: COLOR.ink } }, formatINRShort(amount))), /*#__PURE__*/React.createElement(ProgressBar, { pct: amount / Math.max(1, topCategories[0]?.[1] || 1) * 100, color: COLOR.brick })))));
+}
+
 function ProgressBar({
   pct,
   color
@@ -1575,7 +1639,10 @@ function Dashboard({
       day: "numeric",
       month: "long"
     })
-  }, /*#__PURE__*/React.createElement(Card, {
+  }, /*#__PURE__*/React.createElement(ReportDashboard, {
+    transactions: transactions,
+    settings: settings
+  }), /*#__PURE__*/React.createElement(Card, {
     style: {
       background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       border: "none",
