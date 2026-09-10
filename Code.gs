@@ -53,6 +53,62 @@ function doGet() {
 }
 
 /**
+ * Handles Daily Assist requests from the Ledger web app.
+ * Store the provider key in Apps Script project properties; never put it in index.html.
+ */
+function doPost(e) {
+  try {
+    const body = JSON.parse(e.postData.contents || '{}');
+    if (body.action !== 'assistantChat') {
+      return jsonResponse({ success: false, message: 'Unknown action.' });
+    }
+    return jsonResponse({ success: true, reply: assistantChat(body.message, body.context || {}) });
+  } catch (err) {
+    return jsonResponse({ success: false, message: err.message });
+  }
+}
+
+function jsonResponse(payload) {
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function assistantChat(message, context) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) {
+    throw new Error('Assistant is not configured. Add GEMINI_API_KEY to Apps Script project properties.');
+  }
+  const prompt = [
+    'You are a practical personal daily assistant inside a private household ledger.',
+    'Give concise, specific advice. Never claim to send reminders or change calendars.',
+    'Do not give medical, legal, or financial investment advice. Treat the ledger figures as private.',
+    'Use the context only to help with planning and prioritization.',
+    '',
+    'Ledger context:',
+    JSON.stringify(context),
+    '',
+    'User request:',
+    String(message || '').slice(0, 2000)
+  ].join('\n');
+  const response = UrlFetchApp.fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + encodeURIComponent(apiKey),
+    {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      muteHttpExceptions: true
+    }
+  );
+  const data = JSON.parse(response.getContentText() || '{}');
+  if (response.getResponseCode() >= 300) {
+    throw new Error(data.error && data.error.message ? data.error.message : 'Assistant provider request failed.');
+  }
+  const reply = data.candidates && data.candidates[0] && data.candidates[0].content;
+  if (!reply || !reply.parts || !reply.parts[0]) throw new Error('Assistant returned an empty response.');
+  return reply.parts[0].text;
+}
+
+/**
  * Returns everything the form needs to populate its dropdowns.
  * Called once when the page loads.
  */

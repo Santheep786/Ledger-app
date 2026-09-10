@@ -1,0 +1,164 @@
+HOW TO SET UP LEDGER WITH GOOGLE SHEETS
+================================================================
+
+YOUR DATA LIVES IN YOUR OWN GOOGLE SHEET
+------------------------------------------
+Unlike Firebase, there's no third-party database. Everything is stored
+in a Google Sheet that you own and can open, edit, and export any time
+you like. The app reads and writes to it via the Google Sheets API.
+
+You'll need to do two things before the app works:
+  1. Create a Google Cloud OAuth credential (free, takes ~10 minutes)
+  2. Create the Google Sheet and paste its ID into index.html
+
+============================================================
+PART 1 — CREATE YOUR GOOGLE CLOUD OAUTH CREDENTIAL
+============================================================
+
+1. Go to https://console.cloud.google.com and sign in with any Google
+   account (the same one you'll sign in to the app with later is easiest).
+
+2. Create a new project:
+   - Click the project picker at the top-left > "New Project"
+   - Give it any name (e.g. "Ledger App") > Create
+
+3. Enable the Google Sheets API:
+   - Left sidebar: APIs & Services > Library
+   - Search "Google Sheets API" > click it > Enable
+
+4. Set up the OAuth consent screen:
+   - Left sidebar: APIs & Services > OAuth consent screen
+   - Choose "External" > Create
+   - App name: "Ledger" (or anything you like)
+   - User support email: your email
+   - Developer contact email: your email
+   - Click Save and Continue through the rest (you can skip Scopes and
+     Test Users sections by just clicking "Save and Continue")
+   - On the Summary page, click "Back to Dashboard"
+
+5. Create the OAuth Client ID:
+   - Left sidebar: APIs & Services > Credentials
+   - Click "+ Create Credentials" > "OAuth client ID"
+   - Application type: Web application
+   - Name: anything (e.g. "Ledger Web")
+   - Authorised JavaScript origins: add BOTH of these (one per line):
+       http://localhost
+       https://YOUR-NETLIFY-SUBDOMAIN.netlify.app
+     (replace with your actual Netlify URL from Part 3 below - if you
+     don't have it yet, come back and add it after deploying)
+   - Click Create
+   - A popup shows your Client ID — it looks like:
+       123456789-abcdefg.apps.googleusercontent.com
+   - Copy it. You'll need it in the next step.
+
+6. (Optional but recommended) Publish your app so Google doesn't block it:
+   - Left sidebar: APIs & Services > OAuth consent screen
+   - Click "Publish App" > Confirm
+   - This stops the "app is unverified" warning from appearing on sign-in.
+   - For a personal household app it's fine to skip this — users just have
+     to click "Advanced > Go to Ledger (unsafe)" the first time.
+
+============================================================
+PART 2 — CREATE YOUR GOOGLE SHEET
+============================================================
+
+7. Go to https://sheets.google.com and create a new blank spreadsheet.
+
+8. Name it anything (e.g. "Household Ledger").
+
+9. Copy the Spreadsheet ID from the URL. It's the long string between
+   /d/ and /edit in the URL bar:
+     https://docs.google.com/spreadsheets/d/THIS_IS_YOUR_ID/edit
+   Example: 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms
+
+10. Share the sheet with any other Google accounts (family members) who
+    you want to access the data. They'll sign in to the app with their
+    own Google Account and the app reads/writes the same Sheet.
+
+============================================================
+PART 3 — PASTE YOUR CONFIG INTO THE APP
+============================================================
+
+11. Open index.html in any text editor.
+
+12. Find this block near the top (search for GOOG_CLIENT_ID):
+
+      const GOOG_CLIENT_ID = "YOUR_OAUTH_CLIENT_ID.apps.googleusercontent.com";
+      const SPREADSHEET_ID  = "YOUR_SPREADSHEET_ID";
+
+13. Replace the two placeholder values with your real Client ID (from
+    step 5) and Spreadsheet ID (from step 9). Save the file.
+
+============================================================
+PART 3B — ENABLE AI DAILY ASSIST (OPTIONAL)
+============================================================
+
+The Ledger app includes local planning tools without AI. To enable the
+"Ask your assistant" chat while keeping the provider key off the device:
+
+14. Open the Google Apps Script project that contains Code.gs.
+15. Add a Script Property named GEMINI_API_KEY with your Gemini API key:
+  Project Settings > Script Properties > Add script property
+    The key is read only by Apps Script and is not stored in index.html.
+16. Deploy the Apps Script project as a Web app:
+  Deploy > New deployment > Web app
+  Execute as: Me
+  Who has access: Anyone with Google account
+17. Copy the Web app URL ending in /exec.
+18. In index.html, paste that URL into:
+  const ASSISTANT_ENDPOINT = "";
+19. Publish or redeploy the Ledger app after saving index.html.
+
+The assistant receives only a compact daily summary: date, totals, reminder
+titles and the daily note. It does not receive the complete transaction list.
+If the endpoint is empty, the Daily Assist screen continues to work locally.
+
+============================================================
+PART 4 — DEPLOY & INSTALL
+============================================================
+
+Netlify Drop (easiest, 2 minutes, no account needed):
+  1. Go to app.netlify.com/drop
+  2. Drag the whole folder (index.html, manifest.json, sw.js, icons/)
+     onto the page.
+  3. You get a live https:// link instantly.
+
+Then go back to Google Cloud Console (step 5) and add that Netlify URL
+to "Authorised JavaScript origins" if you haven't already.
+
+Install on iPhone:
+  1. Open Safari > go to your Netlify link
+  2. Sign in with Google (first time: approve the Sheets permission)
+  3. Share icon > "Add to Home Screen" > Add
+  4. Opens full-screen, just like a regular app
+
+Install on Android:
+  Chrome > ⋮ menu > "Add to Home screen"
+
+============================================================
+HOW THE DATA IS STRUCTURED IN YOUR SHEET
+============================================================
+The app automatically creates 4 tabs in your Sheet on first sign-in:
+
+  Transactions  — one row per entry (date, type, category, amount, etc.)
+  Loans         — one row per loan (name, rate, tenure, etc.)
+  Settings      — key/value rows (bank names, FY year, card config)
+  Budgets       — category/monthly budget rows
+
+You can view, filter, and even edit these directly in Google Sheets.
+The app re-reads the Sheet every 30 seconds, so changes you make in
+Sheets appear in the app shortly afterwards, and vice versa.
+
+============================================================
+SHARING WITH FAMILY MEMBERS
+============================================================
+Everyone signs in with their OWN Google Account — no shared passwords.
+All they need to do is:
+  1. Open the same Netlify URL in Safari (iPhone) or Chrome (Android)
+  2. Sign in with Google when prompted
+  3. Approve the Sheets permission (first time only)
+  4. Add to Home Screen
+
+As long as you've shared the Google Sheet with their account (step 10),
+they'll see and be able to add to the same household data. Each entry
+shows who added it.
